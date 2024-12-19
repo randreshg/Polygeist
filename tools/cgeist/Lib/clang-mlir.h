@@ -286,6 +286,10 @@ public:
 
   ValueCategory VisitOMPSingleDirective(clang::OMPSingleDirective *);
 
+  ValueCategory VisitOMPTaskDirective(clang::OMPTaskDirective *);
+
+  ValueCategory VisitOMPTaskwaitDirective(clang::OMPTaskwaitDirective *);
+
   ValueCategory VisitOMPForDirective(clang::OMPForDirective *);
 
   ValueCategory VisitOMPParallelDirective(clang::OMPParallelDirective *);

@@ -7,12 +7,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "IfScope.h"
+#include "ValueCategory.h"
 #include "clang-mlir.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Diagnostics.h"
+#include "llvm/Frontend/OpenMP/OMP.h.inc"
+#include <csignal>
 
 #define DEBUG_TYPE "CGStmt"
 
@@ -307,6 +310,8 @@ ValueCategory MLIRScanner::VisitForStmt(clang::ForStmt *fors) {
   return nullptr;
 }
 
+
+
 ValueCategory MLIRScanner::VisitCXXForRangeStmt(clang::CXXForRangeStmt *fors) {
   IfScope scope(*this);
 
@@ -425,6 +430,199 @@ MLIRScanner::VisitOMPSingleDirective(clang::OMPSingleDirective *par) {
   allocationScope = oldScope;
   builder.setInsertionPoint(oldblock, oldpoint);
   return nullptr;
+}
+
+ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) {
+  IfScope scope(*this);
+  auto loc = getMLIRLocation(task->getBeginLoc());
+
+  // Map to store original variable mappings
+  std::map<VarDecl *, ValueCategory> prevInduction;
+
+  /// Handle the clauses in the task directive
+  mlir::Value ifExprVal = nullptr;
+  mlir::Value finalExprVal = nullptr;
+  mlir::UnitAttr untiedAttr = nullptr;
+  mlir::UnitAttr mergeableAttr = nullptr;
+  mlir::Value priorityVal = nullptr;
+
+  SmallVector<Value, 4> inReductionVars;     // If needed
+  ArrayAttr inReductionsAttr = nullptr;      // If needed
+
+  SmallVector<Attribute, 4> dependKindAttrs;
+  SmallVector<Value, 4> dependVars;
+
+  // Handle other clauses like allocate_vars, allocators_vars if present
+  SmallVector<Value, 4> allocateVars;
+  SmallVector<Value, 4> allocatorsVars;
+
+  // Iterate over clauses in the OMPTaskDirective
+  for (auto *f : task->clauses()) {
+    switch (f->getClauseKind()) {
+    case llvm::omp::OMPC_if: {
+      // Extract if expression
+      auto *ifClause = cast<OMPIfClause>(f);
+      ifExprVal = Visit(ifClause->getCondition()).getValue(loc, builder);
+    } break;
+    case llvm::omp::OMPC_final: {
+      auto *finalClause = cast<OMPFinalClause>(f);
+      finalExprVal = Visit(finalClause->getCondition()).getValue(loc, builder);
+    } break;
+    case llvm::omp::OMPC_untied:
+      untiedAttr = mlir::UnitAttr::get(builder.getContext());
+      break;
+    case llvm::omp::OMPC_mergeable:
+      mergeableAttr = mlir::UnitAttr::get(builder.getContext());
+      break;
+    case llvm::omp::OMPC_priority: {
+      auto *priorityClause = cast<OMPPriorityClause>(f);
+      priorityVal = Visit(priorityClause->getPriority()).getValue(loc, builder);
+    } break;
+    case llvm::omp::OMPC_depend: {
+      // Depend clause: handle depend(in: var), depend(out: var), etc.
+      auto *depClause = cast<OMPDependClause>(f);
+      auto depKind = depClause->getDependencyKind();
+
+      // Convert Clang dep kind to MLIR omp::ClauseTaskDepend
+      mlir::omp::ClauseTaskDepend pbKind;
+      switch (depKind) {
+      case OMPC_DEPEND_in:
+        pbKind = mlir::omp::ClauseTaskDepend::taskdependin;
+        break;
+      case OMPC_DEPEND_out:
+        pbKind = mlir::omp::ClauseTaskDepend::taskdependout;
+        break;
+      case OMPC_DEPEND_inout:
+        pbKind = mlir::omp::ClauseTaskDepend::taskdependinout;
+        break;
+      default:
+        llvm_unreachable("Unknown dependency kind in OpenMP depend clause");
+      }
+
+      // Create the MLIR attribute for the dependency kind
+      auto kindAttr = mlir::omp::ClauseTaskDependAttr::get(builder.getContext(), pbKind);
+
+      // For each variable in the depend clause
+      for (auto *depExpr : depClause->varlists()) {
+        // Ensure OpenMP-compatible types (allocate if needed)
+        Value varVal = Visit(depExpr).getValue(loc, builder);
+        if (!varVal.getType().isa<mlir::MemRefType>()) {
+          auto memrefType = mlir::MemRefType::get({}, varVal.getType());
+          auto allocOp = builder.create<mlir::memref::AllocaOp>(loc, memrefType);
+          builder.create<mlir::memref::StoreOp>(loc, varVal, allocOp);
+          varVal = allocOp;
+        }
+        dependVars.push_back(varVal);
+        dependKindAttrs.push_back(kindAttr);
+      }
+    } break;
+    case llvm::omp::OMPC_private:
+    case llvm::omp::OMPC_firstprivate: {
+      // Iterate through the variables in the clause
+      for (auto *stmt : f->children()) {
+        VarDecl *name = cast<VarDecl>(cast<DeclRefExpr>(stmt)->getDecl());
+
+        // Save the original mapping
+        prevInduction[name] = params[name];
+        params.erase(name); // Remove from current symbol table
+
+        bool isArray = false;
+        bool LLVMABI = false;
+        mlir::Type ty;
+
+        // Determine the type of the variable
+        if (Glob.getMLIRType(Glob.CGM.getContext().getLValueReferenceType(
+                                name->getType()))
+                .isa<mlir::LLVM::LLVMPointerType>()) {
+          LLVMABI = true;
+          bool undef;
+          ty = Glob.getMLIRType(name->getType(), &undef);
+        } else {
+          ty = Glob.getMLIRType(name->getType(), &isArray);
+        }
+
+        // Allocate space for the private copy
+        auto allocOp = createAllocOp(ty, name, /*memtype*/ 0,
+                                    /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
+
+        // Add the private copy to the symbol table
+        params[name] = ValueCategory(allocOp, true);
+
+        // Handle initialization for firstprivate
+        if (f->getClauseKind() == llvm::omp::OMPC_firstprivate) {
+          // Copy the original value to the private copy
+          params[name].store(loc, builder, prevInduction[name], isArray);
+        }
+      }
+    } break;
+    default:
+      llvm::errs() << "Unhandled OMP clause in task: " << (int)f->getClauseKind() << "\n";
+      task->dump();
+    }
+  }
+
+  ArrayAttr dependsAttr = nullptr;
+  if (!dependKindAttrs.empty()) {
+    dependsAttr = builder.getArrayAttr(dependKindAttrs);
+  }
+
+  // Create the omp.task operation
+  auto taskOp = builder.create<omp::TaskOp>(
+      loc,
+      ifExprVal,
+      finalExprVal,
+      untiedAttr,
+      mergeableAttr,
+      inReductionVars,
+      inReductionsAttr,
+      priorityVal,
+      dependsAttr,
+      dependVars,
+      allocateVars,
+      allocatorsVars);
+
+  // Save the current insertion point and block
+  auto oldpoint = builder.getInsertionPoint();
+  auto *oldblock = builder.getInsertionBlock();
+
+  // Add a block to the region of omp.task
+  taskOp.getRegion().push_back(new Block());
+  builder.setInsertionPointToStart(&taskOp.getRegion().front());
+
+  auto executeRegion =
+      builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
+  executeRegion.getRegion().push_back(new Block());
+  builder.create<omp::TerminatorOp>(loc);
+  builder.setInsertionPointToStart(&executeRegion.getRegion().back());
+
+  auto *oldScope = allocationScope;
+  allocationScope = &executeRegion.getRegion().back();
+  
+  // Visit the body of the captured statement
+  Visit(cast<CapturedStmt>(task->getAssociatedStmt())
+            ->getCapturedDecl()
+            ->getBody());
+
+  builder.create<scf::YieldOp>(loc);
+  allocationScope = oldScope;
+  builder.setInsertionPoint(oldblock, oldpoint);
+
+  for (auto pair : prevInduction)
+    params[pair.first] = pair.second;
+  return nullptr;
+}
+
+ValueCategory MLIRScanner::VisitOMPTaskwaitDirective(clang::OMPTaskwaitDirective *taskwait) {
+  // Get the location of the directive
+  auto loc = getMLIRLocation(taskwait->getBeginLoc());
+  /// 
+  // printf("OMPTaskwaitDirective\n");
+  // Create the omp.taskwait operation
+  builder.create<omp::TaskwaitOp>(loc);
+
+  /// Raise error
+  // llvm::errs() << "Taskwait directive not supported\n";
+  return nullptr; // Taskwait does not produce a value
 }
 
 ValueCategory MLIRScanner::VisitOMPForDirective(clang::OMPForDirective *fors) {
