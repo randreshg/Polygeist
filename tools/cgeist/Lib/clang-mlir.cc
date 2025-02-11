@@ -16,6 +16,7 @@
 #include "utils.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
+#include "clang/AST/Type.h"
 #include "clang/Basic/DiagnosticOptions.h"
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/FileSystemOptions.h"
@@ -36,6 +37,7 @@
 #include "clang/Parse/Parser.h"
 #include "clang/Sema/Sema.h"
 #include "clang/Sema/SemaDiagnostic.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -536,12 +538,28 @@ mlir::Value MLIRScanner::createAllocOp(mlir::Type t, VarDecl *name,
       if (auto var = dyn_cast<VariableArrayType>(
               name->getType()->getUnqualifiedDesugaredType())) {
         assert(shape[0] == ShapedType::kDynamic);
+
         mr = mlir::MemRefType::get(
             shape, mt.getElementType(), MemRefLayoutAttrInterface(),
             wrapIntegerMemorySpace(memspace, mt.getContext()));
-        auto len = Visit(var->getSizeExpr()).getValue(varLoc, builder);
+
+        auto sizeExpr = var->getSizeExpr();
+        SmallVector<mlir::Value, 4> lens;
+        auto *VAT = var;
+        mlir::Value len = Visit(sizeExpr).getValue(varLoc, builder);
         len = builder.create<IndexCastOp>(varLoc, builder.getIndexType(), len);
-        alloc = builder.create<mlir::memref::AllocaOp>(varLoc, mr, len);
+        lens.push_back(len);
+
+        while (isa<VariableArrayType>(VAT->getElementType())) {
+          VAT = dyn_cast<VariableArrayType>(VAT->getElementType());
+          VAT->dump();
+          len = Visit(VAT->getSizeExpr()).getValue(varLoc, builder);
+          len =
+              builder.create<IndexCastOp>(varLoc, builder.getIndexType(), len);
+          lens.push_back(len);
+        }
+
+        alloc = builder.create<mlir::memref::AllocaOp>(varLoc, mr, lens);
         builder.create<polygeist::TrivialUseOp>(varLoc, alloc);
         if (memspace != 0) {
           alloc = abuilder.create<polygeist::Pointer2MemrefOp>(
