@@ -1204,6 +1204,10 @@ protected:
 
     SmallVector<LLVM::GEPArg> args = llvm::to_vector(llvm::map_range(
         adaptor.getIndices(), [](Value v) { return LLVM::GEPArg(v); }));
+    /// If args is empty, add a zero index.
+    if (args.empty()) {
+      args.push_back(LLVM::GEPArg(0));
+    }
     auto elTy = convertMemrefElementTypeForLLVMPointer(
         originalType, *this->getTypeConverter());
     if (!elTy) {
