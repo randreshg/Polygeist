@@ -310,8 +310,6 @@ ValueCategory MLIRScanner::VisitForStmt(clang::ForStmt *fors) {
   return nullptr;
 }
 
-
-
 ValueCategory MLIRScanner::VisitCXXForRangeStmt(clang::CXXForRangeStmt *fors) {
   IfScope scope(*this);
 
@@ -432,7 +430,8 @@ MLIRScanner::VisitOMPSingleDirective(clang::OMPSingleDirective *par) {
   return nullptr;
 }
 
-ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) {
+ValueCategory
+MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) {
   IfScope scope(*this);
   auto loc = getMLIRLocation(task->getBeginLoc());
 
@@ -446,8 +445,8 @@ ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) 
   mlir::UnitAttr mergeableAttr = nullptr;
   mlir::Value priorityVal = nullptr;
 
-  SmallVector<Value, 4> inReductionVars;     // If needed
-  ArrayAttr inReductionsAttr = nullptr;      // If needed
+  SmallVector<Value, 4> inReductionVars; // If needed
+  ArrayAttr inReductionsAttr = nullptr;  // If needed
 
   SmallVector<Attribute, 4> dependKindAttrs;
   SmallVector<Value, 4> dependVars;
@@ -468,12 +467,12 @@ ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) 
       auto *finalClause = cast<OMPFinalClause>(f);
       finalExprVal = Visit(finalClause->getCondition()).getValue(loc, builder);
     } break;
-    case llvm::omp::OMPC_untied:
+    case llvm::omp::OMPC_untied: {
       untiedAttr = mlir::UnitAttr::get(builder.getContext());
-      break;
-    case llvm::omp::OMPC_mergeable:
+    } break;
+    case llvm::omp::OMPC_mergeable: {
       mergeableAttr = mlir::UnitAttr::get(builder.getContext());
-      break;
+    } break;
     case llvm::omp::OMPC_priority: {
       auto *priorityClause = cast<OMPPriorityClause>(f);
       priorityVal = Visit(priorityClause->getPriority()).getValue(loc, builder);
@@ -500,7 +499,8 @@ ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) 
       }
 
       // Create the MLIR attribute for the dependency kind
-      auto kindAttr = mlir::omp::ClauseTaskDependAttr::get(builder.getContext(), pbKind);
+      auto kindAttr =
+          mlir::omp::ClauseTaskDependAttr::get(builder.getContext(), pbKind);
 
       // For each variable in the depend clause
       for (auto *depExpr : depClause->varlists()) {
@@ -508,7 +508,8 @@ ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) 
         Value varVal = Visit(depExpr).getValue(loc, builder);
         if (!varVal.getType().isa<mlir::MemRefType>()) {
           auto memrefType = mlir::MemRefType::get({}, varVal.getType());
-          auto allocOp = builder.create<mlir::memref::AllocaOp>(loc, memrefType);
+          auto allocOp =
+              builder.create<mlir::memref::AllocaOp>(loc, memrefType);
           builder.create<mlir::memref::StoreOp>(loc, varVal, allocOp);
           varVal = allocOp;
         }
@@ -518,6 +519,7 @@ ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) 
     } break;
     case llvm::omp::OMPC_private:
     case llvm::omp::OMPC_firstprivate: {
+      /// Allocate space for private copies of the variables
       // Iterate through the variables in the clause
       for (auto *stmt : f->children()) {
         VarDecl *name = cast<VarDecl>(cast<DeclRefExpr>(stmt)->getDecl());
@@ -532,7 +534,7 @@ ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) 
 
         // Determine the type of the variable
         if (Glob.getMLIRType(Glob.CGM.getContext().getLValueReferenceType(
-                                name->getType()))
+                                 name->getType()))
                 .isa<mlir::LLVM::LLVMPointerType>()) {
           LLVMABI = true;
           bool undef;
@@ -543,20 +545,23 @@ ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) 
 
         // Allocate space for the private copy
         auto allocOp = createAllocOp(ty, name, /*memtype*/ 0,
-                                    /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
+                                     /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
 
         // Add the private copy to the symbol table
         params[name] = ValueCategory(allocOp, true);
 
         // Handle initialization for firstprivate
         if (f->getClauseKind() == llvm::omp::OMPC_firstprivate) {
-          // Copy the original value to the private copy
           params[name].store(loc, builder, prevInduction[name], isArray);
         }
       }
     } break;
+    case llvm::omp::OMPC_shared: {
+      // No action needed
+    } break;
     default:
-      llvm::errs() << "Unhandled OMP clause in task: " << (int)f->getClauseKind() << "\n";
+      llvm::errs() << "Unhandled OMP clause in task: "
+                   << (int)f->getClauseKind() << "\n";
       task->dump();
     }
   }
@@ -568,17 +573,8 @@ ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) 
 
   // Create the omp.task operation
   auto taskOp = builder.create<omp::TaskOp>(
-      loc,
-      ifExprVal,
-      finalExprVal,
-      untiedAttr,
-      mergeableAttr,
-      inReductionVars,
-      inReductionsAttr,
-      priorityVal,
-      dependsAttr,
-      dependVars,
-      allocateVars,
+      loc, ifExprVal, finalExprVal, untiedAttr, mergeableAttr, inReductionVars,
+      inReductionsAttr, priorityVal, dependsAttr, dependVars, allocateVars,
       allocatorsVars);
 
   // Save the current insertion point and block
@@ -597,7 +593,7 @@ ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) 
 
   auto *oldScope = allocationScope;
   allocationScope = &executeRegion.getRegion().back();
-  
+
   // Visit the body of the captured statement
   Visit(cast<CapturedStmt>(task->getAssociatedStmt())
             ->getCapturedDecl()
@@ -612,17 +608,11 @@ ValueCategory MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) 
   return nullptr;
 }
 
-ValueCategory MLIRScanner::VisitOMPTaskwaitDirective(clang::OMPTaskwaitDirective *taskwait) {
-  // Get the location of the directive
+ValueCategory
+MLIRScanner::VisitOMPTaskwaitDirective(clang::OMPTaskwaitDirective *taskwait) {
   auto loc = getMLIRLocation(taskwait->getBeginLoc());
-  /// 
-  // printf("OMPTaskwaitDirective\n");
-  // Create the omp.taskwait operation
   builder.create<omp::TaskwaitOp>(loc);
-
-  /// Raise error
-  // llvm::errs() << "Taskwait directive not supported\n";
-  return nullptr; // Taskwait does not produce a value
+  return nullptr;
 }
 
 ValueCategory MLIRScanner::VisitOMPForDirective(clang::OMPForDirective *fors) {
@@ -740,6 +730,8 @@ MLIRScanner::VisitOMPParallelDirective(clang::OMPParallelDirective *par) {
   for (auto *f : par->clauses()) {
     switch (f->getClauseKind()) {
     case llvm::omp::OMPC_private:
+    case llvm::omp::OMPC_firstprivate: {
+      // Allocate space for private copies of the variables
       for (auto *stmt : f->children()) {
         VarDecl *name = cast<VarDecl>(cast<DeclRefExpr>(stmt)->getDecl());
 
@@ -761,9 +753,15 @@ MLIRScanner::VisitOMPParallelDirective(clang::OMPParallelDirective *par) {
         auto allocop = createAllocOp(ty, name, /*memtype*/ 0,
                                      /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
         params[name] = ValueCategory(allocop, true);
-        params[name].store(loc, builder, prevInduction[name], isArray);
+
+        // Handle initialization for firstprivate
+        if (f->getClauseKind() == llvm::omp::OMPC_firstprivate) {
+          params[name].store(loc, builder, prevInduction[name], isArray);
+        }
       }
-      break;
+    }
+
+    break;
     case llvm::omp::OMPC_num_threads: {
       auto *numThreadsClause = cast<OMPNumThreadsClause>(f);
       numThreadsClause->getNumThreads();
