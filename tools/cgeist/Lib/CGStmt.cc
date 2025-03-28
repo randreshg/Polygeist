@@ -477,12 +477,50 @@ MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) {
       auto *priorityClause = cast<OMPPriorityClause>(f);
       priorityVal = Visit(priorityClause->getPriority()).getValue(loc, builder);
     } break;
+    // case llvm::omp::OMPC_depend: {
+    //   // Depend clause: handle depend(in: var), depend(out: var), etc.
+    //   auto *depClause = cast<OMPDependClause>(f);
+    //   auto depKind = depClause->getDependencyKind();
+
+    //   // Convert Clang dep kind to MLIR omp::ClauseTaskDepend
+    //   mlir::omp::ClauseTaskDepend pbKind;
+    //   switch (depKind) {
+    //   case OMPC_DEPEND_in:
+    //     pbKind = mlir::omp::ClauseTaskDepend::taskdependin;
+    //     break;
+    //   case OMPC_DEPEND_out:
+    //     pbKind = mlir::omp::ClauseTaskDepend::taskdependout;
+    //     break;
+    //   case OMPC_DEPEND_inout:
+    //     pbKind = mlir::omp::ClauseTaskDepend::taskdependinout;
+    //     break;
+    //   default:
+    //     llvm_unreachable("Unknown dependency kind in OpenMP depend clause");
+    //   }
+
+    //   // Create the MLIR attribute for the dependency kind
+    //   auto kindAttr =
+    //       mlir::omp::ClauseTaskDependAttr::get(builder.getContext(), pbKind);
+
+    //   // For each variable in the depend clause
+    //   for (auto *depExpr : depClause->varlists()) {
+    //     // Ensure OpenMP-compatible types (allocate if needed)
+    //     Value varVal = Visit(depExpr).getValue(loc, builder);
+    //     if (!varVal.getType().isa<mlir::MemRefType>()) {
+    //       auto memrefType = mlir::MemRefType::get({}, varVal.getType());
+    //       auto allocOp =
+    //           builder.create<mlir::memref::AllocaOp>(loc, memrefType);
+    //       builder.create<mlir::memref::StoreOp>(loc, varVal, allocOp);
+    //       varVal = allocOp;
+    //     }
+    //     dependVars.push_back(varVal);
+    //     dependKindAttrs.push_back(kindAttr);
+    //   }
+    // } break;
     case llvm::omp::OMPC_depend: {
-      // Depend clause: handle depend(in: var), depend(out: var), etc.
       auto *depClause = cast<OMPDependClause>(f);
       auto depKind = depClause->getDependencyKind();
 
-      // Convert Clang dep kind to MLIR omp::ClauseTaskDepend
       mlir::omp::ClauseTaskDepend pbKind;
       switch (depKind) {
       case OMPC_DEPEND_in:
@@ -495,26 +533,103 @@ MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) {
         pbKind = mlir::omp::ClauseTaskDepend::taskdependinout;
         break;
       default:
-        llvm_unreachable("Unknown dependency kind in OpenMP depend clause");
+        llvm_unreachable("Unknown dependency kind");
       }
 
-      // Create the MLIR attribute for the dependency kind
       auto kindAttr =
           mlir::omp::ClauseTaskDependAttr::get(builder.getContext(), pbKind);
 
-      // For each variable in the depend clause
       for (auto *depExpr : depClause->varlists()) {
-        // Ensure OpenMP-compatible types (allocate if needed)
-        Value varVal = Visit(depExpr).getValue(loc, builder);
-        if (!varVal.getType().isa<mlir::MemRefType>()) {
-          auto memrefType = mlir::MemRefType::get({}, varVal.getType());
-          auto allocOp =
-              builder.create<mlir::memref::AllocaOp>(loc, memrefType);
-          builder.create<mlir::memref::StoreOp>(loc, varVal, allocOp);
-          varVal = allocOp;
+        if (auto *arraySection =
+                dyn_cast<clang::OMPArraySectionExpr>(depExpr)) {
+          // Collect all dimensions from nested array sections
+          SmallVector<clang::OMPArraySectionExpr *> sections;
+          clang::Expr *currentExpr = depExpr;
+
+          // Traverse nested array sections to collect all dimensions
+          while (auto *ase =
+                     dyn_cast<clang::OMPArraySectionExpr>(currentExpr)) {
+            sections.push_back(ase);
+            currentExpr = ase->getBase();
+          }
+
+          // Get the base array (innermost expression)
+          auto baseVC = Visit(currentExpr);
+          mlir::Value base = baseVC.getValue(loc, builder);
+          auto memrefType = base.getType().cast<mlir::MemRefType>();
+          unsigned rank = memrefType.getRank();
+
+          // Verify dimension count matches array rank
+          if (sections.size() != rank) {
+            emitError(loc,
+                      "Array section dimensions (" + Twine(sections.size()) +
+                          ") don't match memref rank (" + Twine(rank) + ")");
+            assert(false && "Array section dimensions mismatch");
+          }
+
+          // Prepare subview parameters for each dimension
+          SmallVector<mlir::Value> offsets, sizes, strides;
+          for (auto *section : llvm::reverse(sections)) {
+            // Lower bound (default 0)
+            mlir::Value lb =
+                section->getLowerBound()
+                    ? builder
+                          .create<arith::IndexCastOp>(
+                              loc, builder.getIndexType(),
+                              Visit(section->getLowerBound())
+                                  .getValue(loc, builder))
+                          .getResult()
+                    : builder.create<arith::ConstantIndexOp>(loc, 0)
+                          .getResult();
+
+            // Length (mandatory per OpenMP spec)
+            mlir::Value len =
+                builder
+                    .create<arith::IndexCastOp>(
+                        loc, builder.getIndexType(),
+                        Visit(section->getLength()).getValue(loc, builder))
+                    .getResult();
+
+            // Stride (default 1)
+            mlir::Value stride =
+                section->getStride()
+                    ? builder
+                          .create<arith::IndexCastOp>(
+                              loc, builder.getIndexType(),
+                              Visit(section->getStride())
+                                  .getValue(loc, builder))
+                          .getResult()
+                    : builder.create<arith::ConstantIndexOp>(loc, 1)
+                          .getResult();
+
+            offsets.push_back(lb);
+            sizes.push_back(len);
+            strides.push_back(stride);
+          }
+
+          // Create subview for the entire multi-dimensional section
+          auto subview = builder.create<mlir::memref::SubViewOp>(
+              loc, base, offsets, sizes, strides);
+
+          dependVars.push_back(subview);
+          dependKindAttrs.push_back(kindAttr);
+        } else {
+          // Handle regular variable dependency
+          auto vc = Visit(depExpr);
+          mlir::Value varVal = vc.getValue(loc, builder);
+
+          if (!varVal.getType().isa<mlir::MemRefType>()) {
+            // Create temporary memref for scalar values
+            auto memrefType = mlir::MemRefType::get({}, varVal.getType());
+            auto alloc =
+                builder.create<mlir::memref::AllocaOp>(loc, memrefType);
+            builder.create<mlir::memref::StoreOp>(loc, varVal, alloc);
+            varVal = alloc;
+          }
+
+          dependVars.push_back(varVal);
+          dependKindAttrs.push_back(kindAttr);
         }
-        dependVars.push_back(varVal);
-        dependKindAttrs.push_back(kindAttr);
       }
     } break;
     case llvm::omp::OMPC_private:
