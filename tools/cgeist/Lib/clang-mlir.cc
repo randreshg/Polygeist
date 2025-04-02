@@ -1677,12 +1677,14 @@ ValueCategory MLIRScanner::CommonArrayToPointer(mlir::Location loc,
 
   auto mt = scalar.val.getType().cast<MemRefType>();
   auto shape = std::vector<int64_t>(mt.getShape());
-  LLVM_DEBUG(llvm::dbgs() << "scalar: " << scalar.val << "\n");
-  if (shape.size() > 1) {
-    shape.erase(shape.begin());
-  } else {
-    shape[0] = ShapedType::kDynamic;
-  }
+  LLVM_DEBUG(llvm::dbgs() << "scalar in CommonArrayToPointer: " << scalar.val
+                          << "\n");
+  // if (shape.size() > 1) {
+  //   shape.erase(shape.begin());
+  // } else {
+  //   shape[0] = ShapedType::kDynamic;
+  // }
+  shape[0] = ShapedType::kDynamic;
   // LLVM_DEBUG(llvm::dbgs() << "scalar: " << scalar.val << "\n");
   auto mt0 =
       mlir::MemRefType::get(shape, mt.getElementType(),
@@ -1699,7 +1701,6 @@ ValueCategory MLIRScanner::CommonArrayLookup(mlir::Location loc,
                                              bool removeIndex) {
   mlir::Value val = array.getValue(loc, builder);
   assert(val);
-
   if (val.getType().isa<LLVM::LLVMPointerType>()) {
 
     mlir::Value vals[] = {
@@ -1761,7 +1762,6 @@ MLIRScanner::VisitArraySubscriptExpr(clang::ArraySubscriptExpr *expr) {
     assert(moo.isReference);
     moo.isReference = false;
     auto mt = moo.val.getType().cast<MemRefType>();
-
     auto shape = std::vector<int64_t>(mt.getShape());
     shape.erase(shape.begin());
     auto mt0 =
