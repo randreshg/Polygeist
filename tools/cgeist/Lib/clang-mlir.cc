@@ -1677,11 +1677,13 @@ ValueCategory MLIRScanner::CommonArrayToPointer(mlir::Location loc,
 
   auto mt = scalar.val.getType().cast<MemRefType>();
   auto shape = std::vector<int64_t>(mt.getShape());
-  // if (shape.size() > 1) {
-  //  shape.erase(shape.begin());
-  //} else {
-  shape[0] = ShapedType::kDynamic;
-  //}
+  LLVM_DEBUG(llvm::dbgs() << "scalar: " << scalar.val << "\n");
+  if (shape.size() > 1) {
+    shape.erase(shape.begin());
+  } else {
+    shape[0] = ShapedType::kDynamic;
+  }
+  // LLVM_DEBUG(llvm::dbgs() << "scalar: " << scalar.val << "\n");
   auto mt0 =
       mlir::MemRefType::get(shape, mt.getElementType(),
                             MemRefLayoutAttrInterface(), mt.getMemorySpace());
