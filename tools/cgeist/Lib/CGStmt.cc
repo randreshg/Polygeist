@@ -477,46 +477,6 @@ MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) {
       auto *priorityClause = cast<OMPPriorityClause>(f);
       priorityVal = Visit(priorityClause->getPriority()).getValue(loc, builder);
     } break;
-    // case llvm::omp::OMPC_depend: {
-    //   // Depend clause: handle depend(in: var), depend(out: var), etc.
-    //   auto *depClause = cast<OMPDependClause>(f);
-    //   auto depKind = depClause->getDependencyKind();
-
-    //   // Convert Clang dep kind to MLIR omp::ClauseTaskDepend
-    //   mlir::omp::ClauseTaskDepend pbKind;
-    //   switch (depKind) {
-    //   case OMPC_DEPEND_in:
-    //     pbKind = mlir::omp::ClauseTaskDepend::taskdependin;
-    //     break;
-    //   case OMPC_DEPEND_out:
-    //     pbKind = mlir::omp::ClauseTaskDepend::taskdependout;
-    //     break;
-    //   case OMPC_DEPEND_inout:
-    //     pbKind = mlir::omp::ClauseTaskDepend::taskdependinout;
-    //     break;
-    //   default:
-    //     llvm_unreachable("Unknown dependency kind in OpenMP depend clause");
-    //   }
-
-    //   // Create the MLIR attribute for the dependency kind
-    //   auto kindAttr =
-    //       mlir::omp::ClauseTaskDependAttr::get(builder.getContext(), pbKind);
-
-    //   // For each variable in the depend clause
-    //   for (auto *depExpr : depClause->varlists()) {
-    //     // Ensure OpenMP-compatible types (allocate if needed)
-    //     Value varVal = Visit(depExpr).getValue(loc, builder);
-    //     if (!varVal.getType().isa<mlir::MemRefType>()) {
-    //       auto memrefType = mlir::MemRefType::get({}, varVal.getType());
-    //       auto allocOp =
-    //           builder.create<mlir::memref::AllocaOp>(loc, memrefType);
-    //       builder.create<mlir::memref::StoreOp>(loc, varVal, allocOp);
-    //       varVal = allocOp;
-    //     }
-    //     dependVars.push_back(varVal);
-    //     dependKindAttrs.push_back(kindAttr);
-    //   }
-    // } break;
     case llvm::omp::OMPC_depend: {
       auto *depClause = cast<OMPDependClause>(f);
       auto depKind = depClause->getDependencyKind();

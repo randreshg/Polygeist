@@ -53,7 +53,6 @@ def GetDeviceGlobalOp
 
 def CacheLoad
     : Polygeist_Op<"cacheload"> {
-
   let arguments = (ins Arg<AnyMemRef, "the reference to load from",
                            [MemRead]>:$memref,
                        Variadic<Index>:$indices);
@@ -80,16 +79,66 @@ def BarrierOp
   let hasCanonicalizer = true;
 }
 
+
+//===----------------------------------------------------------------------===//
+// LoadOp
+//===----------------------------------------------------------------------===//
+def DynLoadOp : Polygeist_Op<"load", [AttrSizedOperandSegments]> {
+  let summary = "Load operation with explicit dimension tracking";
+  let arguments = (ins
+    AnyMemRef:$memref,
+    Variadic<Index>:$indices,
+    Variadic<Index>:$sizes
+  );
+
+  let results = (outs
+    AnyType:$result
+  );
+
+  let assemblyFormat = [{
+    $memref `[` $indices `]` `sizes` `(` $sizes `)` attr-dict `:` type($memref) `->` type($result)
+  }];
+
+  let extraClassDeclaration = [{
+    MemRefType getMemrefType() { 
+      return getMemref().getType().cast<MemRefType>(); 
+    }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// DynStoreOp
+//===----------------------------------------------------------------------===//
+def DynStoreOp : Polygeist_Op<"store", [AttrSizedOperandSegments]> {
+  let summary = "Store operation with explicit dimension tracking";
+  let arguments = (ins
+    AnyType:$value,
+    AnyMemRef:$memref,
+    Variadic<Index>:$indices,
+    Variadic<Index>:$sizes
+  );
+
+  let assemblyFormat = [{
+    $value `,` $memref `[` $indices `]` `sizes` `(` $sizes `)` attr-dict `:` type($value) `,` type($memref)
+  }];
+
+  let extraClassDeclaration = [{
+    MemRefType getMemrefType() { 
+      return getMemref().getType().cast<MemRefType>(); 
+    }
+  }];
+}
+
 //===----------------------------------------------------------------------===//
 // SubIndexOp
 //===----------------------------------------------------------------------===//
-
-def SubIndexOp : Polygeist_Op<"subindex", [
-  ViewLikeOpInterface, Pure
-]> {
+def SubIndexOp : Polygeist_Op<"subindex", [ViewLikeOpInterface, Pure]> {
   let summary = "memref subview operation";
 
-  let arguments = (ins AnyMemRef : $source, Index : $index);
+  let arguments = (
+    ins AnyMemRef : $source, 
+    Index : $index,
+    Variadic<Index>:$sizes);
   let results = (outs AnyMemRef : $result);
 
   let hasFolder = 1;
@@ -98,6 +147,17 @@ def SubIndexOp : Polygeist_Op<"subindex", [
   let extraClassDeclaration = [{
     ::mlir::Value getViewSource() { return getSource(); }
   }];
+
+  let assemblyFormat = [{
+    $source `[` $index `]` `(` $sizes `)` attr-dict `:` type($source) `->` type($result)
+  }];
+
+  let builders = [
+    OpBuilder<(ins "Type":$result, "Value":$source, "Value":$index), [{
+      $_state.addOperands(source);
+      $_state.addOperands(index);
+      $_state.addTypes(result);
+    }]>];
 }
 
 def GPUBlockOp : Polygeist_Op<"gpu_block", [
