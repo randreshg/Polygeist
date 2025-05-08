@@ -81,7 +81,7 @@ def BarrierOp
 
 
 //===----------------------------------------------------------------------===//
-// LoadOp
+// DynLoadOp
 //===----------------------------------------------------------------------===//
 def DynLoadOp : Polygeist_Op<"load", [AttrSizedOperandSegments]> {
   let summary = "Load operation with explicit dimension tracking";

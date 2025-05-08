@@ -153,6 +153,7 @@ struct ValueOrInt {
   bool isValue;
   mlir::Value v_val;
   int64_t i_val;
+  ValueOrInt() : isValue(false), v_val(), i_val(0) {}
   ValueOrInt(mlir::Value v) { initValue(v); }
   void initValue(mlir::Value v) {
     using namespace mlir;
