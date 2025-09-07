@@ -226,6 +226,7 @@ def GPUErrorOp : Polygeist_Op<"gpu_error", [
 def PolygeistYieldOp : Polygeist_Op<"polygeist_yield", [Pure, ReturnLike, Terminator,
     ParentOneOf<["AlternativesOp", "GPUWrapperOp", "GPUErrorOp", "GPUBlockOp", "GPUThreadOp"]>]> {
   let summary = "Polygeist ops terminator";
+  let assemblyFormat = "attr-dict";
 }
 
 def StreamToTokenOp : Polygeist_Op<"stream2token", [
@@ -251,7 +252,8 @@ def Memref2PointerOp : Polygeist_Op<"memref2pointer", [
 
   let hasFolder = 1;
   let hasCanonicalizer = 1;
-  
+
+  let assemblyFormat = "$source attr-dict `:` type($source) `to` type($result)";
   let extraClassDeclaration = [{
     ::mlir::Value getViewSource() { return getSource(); }
   }];
@@ -267,6 +269,7 @@ def MemrefCastOp : Polygeist_Op<"memref_cast", [
 
   //let hasFolder = 1;
   //let hasCanonicalizer = 1;
+  let assemblyFormat = "$source attr-dict `:` type($source) `to` type($result)";
   let extraClassDeclaration = [{
     ::mlir::Value getViewSource() { return getSource(); }
   }];
@@ -282,7 +285,7 @@ def Pointer2MemrefOp : Polygeist_Op<"pointer2memref", [
 
   let hasFolder = 1;
   let hasCanonicalizer = 1;
-  
+  let assemblyFormat = "$source attr-dict `:` type($source) `to` type($result)";
   let extraClassDeclaration = [{
     ::mlir::Value getViewSource() { return getSource(); }
   }];
@@ -294,6 +297,7 @@ def GetFuncOp : Polygeist_Op<"get_func",
   let arguments = (ins FlatSymbolRefAttr:$name);
   let results = (outs LLVM_AnyPointer : $result);
   // let assemblyFormat = "$name `:` type($result) attr-dict";
+  let assemblyFormat = "$name attr-dict `:` type($result)";
   let hasCanonicalizer = 1;
 }
 
@@ -310,6 +314,7 @@ def TypeSizeOp : Polygeist_Op<"typeSize", [Pure]> {
   let results = (outs AnyType : $result);
   let hasFolder = 1;
   let hasCanonicalizer = 1;
+  let assemblyFormat = "$source attr-dict `:` type($result)";
 }
 
 def TypeAlignOp : Polygeist_Op<"typeAlign", [Pure]> {
