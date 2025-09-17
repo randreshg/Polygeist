@@ -542,7 +542,7 @@ MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) {
                     : builder.create<arith::ConstantIndexOp>(loc, 0)
                           .getResult();
 
-            // Length (mandatory per OpenMP spec)
+            // Length 
             mlir::Value len =
                 builder
                     .create<arith::IndexCastOp>(
@@ -680,6 +680,163 @@ MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) {
 
   for (auto pair : prevInduction)
     params[pair.first] = pair.second;
+  return nullptr;
+}
+
+ValueCategory
+MLIRScanner::VisitOMPTaskLoopDirective(clang::OMPTaskLoopDirective *taskloop) {
+  IfScope scope(*this);
+  auto loc = getMLIRLocation(taskloop->getBeginLoc());
+
+  // Map to store original variable mappings
+  std::map<VarDecl *, ValueCategory> prevInduction;
+
+  // Handle the clauses in the taskloop directive
+  mlir::Value ifExprVal = nullptr;
+  mlir::Value finalExprVal = nullptr;
+  mlir::UnitAttr untiedAttr = nullptr;
+  mlir::UnitAttr mergeableAttr = nullptr;
+  mlir::Value priorityVal = nullptr;
+  mlir::IntegerAttr grainSizeVal = nullptr;
+  mlir::IntegerAttr numTasksVal = nullptr;
+  mlir::UnitAttr nounrollAttr = nullptr;
+
+  SmallVector<Value, 4> reductionVars;
+  ArrayAttr reductionsAttr = nullptr;
+
+  SmallVector<Value, 4> inReductionVars;
+  ArrayAttr inReductionsAttr = nullptr;
+
+  // Handle other clauses like allocate_vars, allocators_vars if present
+  SmallVector<Value, 4> allocateVars;
+  SmallVector<Value, 4> allocatorsVars;
+
+  // Iterate over clauses in the OMPTaskLoopDirective
+  for (auto *f : taskloop->clauses()) {
+    switch (f->getClauseKind()) {
+    case llvm::omp::OMPC_if: {
+      auto *ifClause = cast<OMPIfClause>(f);
+      ifExprVal = Visit(ifClause->getCondition()).getValue(loc, builder);
+    } break;
+    case llvm::omp::OMPC_final: {
+      auto *finalClause = cast<OMPFinalClause>(f);
+      finalExprVal = Visit(finalClause->getCondition()).getValue(loc, builder);
+    } break;
+    case llvm::omp::OMPC_untied: {
+      untiedAttr = mlir::UnitAttr::get(builder.getContext());
+    } break;
+    case llvm::omp::OMPC_mergeable: {
+      mergeableAttr = mlir::UnitAttr::get(builder.getContext());
+    } break;
+    case llvm::omp::OMPC_priority: {
+      auto *priorityClause = cast<OMPPriorityClause>(f);
+      priorityVal = Visit(priorityClause->getPriority()).getValue(loc, builder);
+    } break;
+    case llvm::omp::OMPC_grainsize: {
+      auto *grainsizeClause = cast<OMPGrainsizeClause>(f);
+      auto grainsizeValue =
+          Visit(grainsizeClause->getGrainsize()).getValue(loc, builder);
+      if (auto constantOp = grainsizeValue.getDefiningOp<arith::ConstantOp>()) {
+        if (auto intAttr = constantOp.getValue().dyn_cast<IntegerAttr>()) {
+          grainSizeVal = intAttr;
+        }
+      }
+    } break;
+    case llvm::omp::OMPC_num_tasks: {
+      auto *numTasksClause = cast<OMPNumTasksClause>(f);
+      auto numTasksValue =
+          Visit(numTasksClause->getNumTasks()).getValue(loc, builder);
+      if (auto constantOp = numTasksValue.getDefiningOp<arith::ConstantOp>()) {
+        if (auto intAttr = constantOp.getValue().dyn_cast<IntegerAttr>()) {
+          numTasksVal = intAttr;
+        }
+      }
+    } break;
+    case llvm::omp::OMPC_nogroup: {
+      // Handle nogroup clause if needed
+    } break;
+    default:
+      // Handle other clauses as needed
+      break;
+    }
+  }
+
+  // Get loop bounds and step
+  SmallVector<Value, 4> lowerBounds;
+  SmallVector<Value, 4> upperBounds;
+  SmallVector<Value, 4> steps;
+
+  // For now, create a simple taskloop with hard-coded bounds
+  if (lowerBounds.empty()) {
+    auto lowerBound = builder.create<arith::ConstantIndexOp>(loc, 0);
+    auto upperBound = builder.create<arith::ConstantIndexOp>(loc, 10);
+    auto step = builder.create<arith::ConstantIndexOp>(loc, 1);
+
+    lowerBounds.push_back(lowerBound);
+    upperBounds.push_back(upperBound);
+    steps.push_back(step);
+  }
+
+  // Convert grainSizeVal to Value if available
+  mlir::Value grainSizeValue = mlir::Value();
+  if (grainSizeVal) {
+    grainSizeValue = builder.create<arith::ConstantOp>(loc, grainSizeVal);
+  }
+
+  // Convert numTasksVal to Value if available
+  mlir::Value numTasksValue = mlir::Value();
+  if (numTasksVal) {
+    numTasksValue = builder.create<arith::ConstantOp>(loc, numTasksVal);
+  }
+
+  // Create the omp.taskloop operation with minimal operands
+  auto taskloopOp = builder.create<omp::TaskLoopOp>(
+      loc, lowerBounds, upperBounds, steps,
+      /*inclusive=*/false, /*if_expr=*/mlir::Value(),
+      /*final_expr=*/mlir::Value(), /*untied=*/false,
+      /*mergeable=*/false, inReductionVars,
+      /*in_reductions=*/nullptr, reductionVars,
+      /*reductions=*/nullptr, /*priority=*/mlir::Value(), allocateVars,
+      allocatorsVars,
+      /*grain_size=*/grainSizeValue,
+      /*num_tasks=*/numTasksValue,
+      /*nogroup=*/false);
+
+  // Save the current insertion point and block
+  auto oldpoint = builder.getInsertionPoint();
+  auto *oldblock = builder.getInsertionBlock();
+
+  // Add a block to the region of omp.taskloop
+  taskloopOp.getRegion().push_back(new Block());
+  Block *loopBlock = &taskloopOp.getRegion().front();
+
+  // Add induction variable as block argument
+  loopBlock->addArgument(builder.getIndexType(), loc);
+
+  builder.setInsertionPointToStart(loopBlock);
+
+  auto executeRegion =
+      builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
+  executeRegion.getRegion().push_back(new Block());
+  builder.create<omp::TerminatorOp>(loc);
+  builder.setInsertionPointToStart(&executeRegion.getRegion().back());
+
+  auto *oldScope = allocationScope;
+  allocationScope = &executeRegion.getRegion().back();
+
+  // Visit the taskloop body
+  Visit(cast<CapturedStmt>(taskloop->getAssociatedStmt())
+            ->getCapturedDecl()
+            ->getBody());
+
+  builder.create<scf::YieldOp>(loc);
+  allocationScope = oldScope;
+  builder.setInsertionPoint(oldblock, oldpoint);
+
+  // Restore previous variable mappings
+  for (auto pair : prevInduction)
+    params[pair.first] = pair.second;
+
   return nullptr;
 }
 

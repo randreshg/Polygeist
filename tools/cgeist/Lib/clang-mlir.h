@@ -288,6 +288,8 @@ public:
 
   ValueCategory VisitOMPTaskDirective(clang::OMPTaskDirective *);
 
+  ValueCategory VisitOMPTaskLoopDirective(clang::OMPTaskLoopDirective *);
+
   ValueCategory VisitOMPTaskwaitDirective(clang::OMPTaskwaitDirective *);
 
   ValueCategory VisitOMPForDirective(clang::OMPForDirective *);
