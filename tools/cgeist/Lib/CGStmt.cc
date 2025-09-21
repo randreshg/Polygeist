@@ -542,7 +542,7 @@ MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) {
                     : builder.create<arith::ConstantIndexOp>(loc, 0)
                           .getResult();
 
-            // Length 
+            // Length
             mlir::Value len =
                 builder
                     .create<arith::IndexCastOp>(
@@ -966,7 +966,6 @@ ValueCategory MLIRScanner::VisitOMPForDirective(clang::OMPForDirective *fors) {
   auto *oldScope = allocationScope;
   allocationScope = &executeRegion.getRegion().back();
 
-
   std::map<VarDecl *, ValueCategory> prevInduction;
   for (auto zp : zip(inds, fors->counters())) {
     auto idx = builder.create<IndexCastOp>(
@@ -1006,7 +1005,8 @@ ValueCategory MLIRScanner::VisitOMPForDirective(clang::OMPForDirective *fors) {
   // end of the loop.
   builder.setInsertionPoint(oldblock, oldpoint);
 
-  // Combine private accumulators back into shared variables using omp.atomic.update
+  // Combine private accumulators back into shared variables using
+  // omp.atomic.update
   if (!prevReduction.empty()) {
     for (auto &pr : prevReduction) {
       VarDecl *name = pr.first;
@@ -1032,7 +1032,8 @@ ValueCategory MLIRScanner::VisitOMPForDirective(clang::OMPForDirective *fors) {
         elemTy = privVal.getType();
 
       auto aupd = builder.create<omp::AtomicUpdateOp>(
-          loc, xAddr, mlir::IntegerAttr(), mlir::omp::ClauseMemoryOrderKindAttr());
+          loc, xAddr, mlir::IntegerAttr(),
+          mlir::omp::ClauseMemoryOrderKindAttr());
       auto &reg = aupd.getRegion();
       auto *body = new Block();
       body->addArgument(elemTy, loc);
@@ -1158,6 +1159,12 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
 
   // Collect reduction variables (support '+' on scalars)
   SmallVector<VarDecl *, 4> reductionVars;
+
+  // Handle schedule clause
+  mlir::omp::ClauseScheduleKindAttr scheduleValAttr = nullptr;
+  mlir::Value scheduleChunkVar = nullptr;
+  mlir::omp::ScheduleModifierAttr scheduleModifierAttr = nullptr;
+
   for (auto *cl : fors->clauses()) {
     if (cl->getClauseKind() == llvm::omp::OMPC_reduction) {
       auto *rc = cast<OMPReductionClause>(cl);
@@ -1167,6 +1174,45 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
             reductionVars.push_back(vd);
         }
       }
+    } else if (cl->getClauseKind() == llvm::omp::OMPC_schedule) {
+      auto *scheduleClause = cast<OMPScheduleClause>(cl);
+
+      // Map Clang schedule kind to MLIR schedule kind
+      mlir::omp::ClauseScheduleKind scheduleKind;
+      switch (scheduleClause->getScheduleKind()) {
+      case OMPC_SCHEDULE_static:
+        scheduleKind = mlir::omp::ClauseScheduleKind::Static;
+        break;
+      case OMPC_SCHEDULE_dynamic:
+        scheduleKind = mlir::omp::ClauseScheduleKind::Dynamic;
+        break;
+      case OMPC_SCHEDULE_guided:
+        scheduleKind = mlir::omp::ClauseScheduleKind::Guided;
+        break;
+      case OMPC_SCHEDULE_auto:
+        scheduleKind = mlir::omp::ClauseScheduleKind::Auto;
+        break;
+      case OMPC_SCHEDULE_runtime:
+        scheduleKind = mlir::omp::ClauseScheduleKind::Runtime;
+        break;
+      default:
+        scheduleKind = mlir::omp::ClauseScheduleKind::Static;
+        break;
+      }
+
+      scheduleValAttr = mlir::omp::ClauseScheduleKindAttr::get(
+          builder.getContext(), scheduleKind);
+
+      // Handle chunk size if present
+      if (scheduleClause->getChunkSize()) {
+        scheduleChunkVar =
+            Visit(scheduleClause->getChunkSize()).getValue(loc, builder);
+      }
+
+      // Handle schedule modifiers if present
+      // Note: Clang's OMPScheduleClause has modifiers, but we'll implement
+      // basic support
+      // TODO: Add proper modifier handling if needed
     }
   }
 
@@ -1206,154 +1252,184 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
         loc, builder.getIndexType(), Visit(f).getValue(loc, builder)));
   }
 
-  auto affineOp = builder.create<scf::ParallelOp>(loc, inits, finals, incs);
+  // Determine if we can use scf::ParallelOp (only for static or no schedule)
+  bool useScfParallel =
+      !scheduleValAttr ||
+      scheduleValAttr.getValue() == mlir::omp::ClauseScheduleKind::Static;
 
-  auto inds = affineOp.getInductionVars();
+  SmallVector<mlir::Value> inds;
 
-  auto oldpoint = builder.getInsertionPoint();
-  auto *oldblock = builder.getInsertionBlock();
+  if (useScfParallel) {
+    // Use scf::ParallelOp for static scheduling or no schedule clause.
+    // If a static schedule chunk is provided, use it as the step; otherwise
+    // reuse computed steps.
+    SmallVector<mlir::Value> steps(incs.begin(), incs.end());
+    if (scheduleChunkVar) {
+      auto stepIdx = builder.create<IndexCastOp>(loc, builder.getIndexType(),
+                                                 scheduleChunkVar);
+      steps.assign(inits.size(), stepIdx);
+    }
 
-  builder.setInsertionPointToStart(&affineOp.getRegion().front());
+    auto parallelOp =
+        builder.create<scf::ParallelOp>(loc, inits, finals, steps);
+    inds = parallelOp.getInductionVars();
 
-  auto executeRegion =
-      builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
-  executeRegion.getRegion().push_back(new Block());
-  builder.setInsertionPointToStart(&executeRegion.getRegion().back());
+    auto oldpoint = builder.getInsertionPoint();
+    auto *oldblock = builder.getInsertionBlock();
 
-  auto *oldScope = allocationScope;
-  allocationScope = &executeRegion.getRegion().back();
+    builder.setInsertionPointToStart(&parallelOp.getRegion().front());
 
-  // Prepare per-thread private accumulators for reductions in the loop region
-  std::map<VarDecl *, ValueCategory> prevReduction;
-  DenseMap<VarDecl *, mlir::Value> privateAccum;
-  if (!reductionVars.empty()) {
-    for (auto *name : reductionVars) {
-      if (params.find(name) == params.end())
-        continue;
+    auto executeRegion =
+        builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
+    executeRegion.getRegion().push_back(new Block());
+    builder.setInsertionPointToStart(&executeRegion.getRegion().back());
 
-      prevReduction[name] = params[name];
-      params.erase(name);
+    auto *oldScope = allocationScope;
+    allocationScope = &executeRegion.getRegion().back();
 
-      bool isArray = false;
+    // Handle induction variables
+    std::map<VarDecl *, ValueCategory> prevInduction;
+    for (auto zp : zip(inds, fors->counters())) {
+      auto idx = builder.create<IndexCastOp>(
+          loc, getMLIRType(fors->getIterationVariable()->getType()),
+          std::get<0>(zp));
+      VarDecl *name =
+          cast<VarDecl>(cast<DeclRefExpr>(std::get<1>(zp))->getDecl());
+
+      if (params.find(name) != params.end()) {
+        prevInduction[name] = params[name];
+        params.erase(name);
+      }
+
       bool LLVMABI = false;
-      mlir::Type elemTy;
+      bool isArray = false;
       if (Glob.getMLIRType(
                   Glob.CGM.getContext().getLValueReferenceType(name->getType()))
-              .isa<mlir::LLVM::LLVMPointerType>()) {
+              .isa<mlir::LLVM::LLVMPointerType>())
         LLVMABI = true;
-        bool undef;
-        elemTy = Glob.getMLIRType(name->getType(), &undef);
-      } else {
-        elemTy = Glob.getMLIRType(name->getType(), &isArray);
+      else
+        Glob.getMLIRType(name->getType(), &isArray);
+
+      auto allocop = createAllocOp(idx.getType(), name, /*memtype*/ 0,
+                                   /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
+      params[name] = ValueCategory(allocop, true);
+      params[name].store(loc, builder, idx);
+    }
+
+    // Visit the loop body
+    Visit(fors->getBody());
+
+    builder.create<scf::YieldOp>(loc);
+    allocationScope = oldScope;
+    builder.setInsertionPoint(oldblock, oldpoint);
+
+    // Restore previous variable mappings
+    for (auto pair : prevInduction)
+      params[pair.first] = pair.second;
+
+  } else {
+    // Use omp::ParallelOp + omp::WsLoopOp for non-static scheduling
+    auto parallelOp = builder.create<omp::ParallelOp>(
+        loc, /*if_expr_var*/ Value{}, /*num_threads*/ Value{},
+        /*allocate_vars*/ ValueRange{}, /*allocators_vars*/ ValueRange{},
+        /*reduction_vars*/ ValueRange{}, /*reductions*/ ArrayAttr{},
+        /*proc_bind_val*/ omp::ClauseProcBindKindAttr{});
+
+    auto oldpoint = builder.getInsertionPoint();
+    auto *oldblock = builder.getInsertionBlock();
+
+    parallelOp.getRegion().push_back(new Block());
+    builder.setInsertionPointToStart(&parallelOp.getRegion().front());
+
+    auto executeRegion =
+        builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
+    executeRegion.getRegion().push_back(new Block());
+    builder.create<omp::TerminatorOp>(loc);
+    builder.setInsertionPointToStart(&executeRegion.getRegion().back());
+
+    auto *oldScope = allocationScope;
+    allocationScope = &executeRegion.getRegion().back();
+
+    // Create the worksharing loop inside the parallel region
+    auto wsLoopOp = builder.create<omp::WsLoopOp>(
+        loc, inits, finals, incs,
+        /*linear_vars*/ ValueRange{},
+        /*linear_step_vars*/ ValueRange{},
+        /*reduction_vars*/ ValueRange{},
+        /*reductions*/ nullptr,
+        /*schedule_val*/ scheduleValAttr,
+        /*schedule_chunk_var*/ scheduleChunkVar,
+        /*schedule_modifier*/ scheduleModifierAttr,
+        /*simd_modifier*/ nullptr,
+        /*nowait*/ nullptr,
+        /*ordered_val*/ nullptr,
+        /*order_val*/ nullptr,
+        /*inclusive*/ nullptr);
+
+    wsLoopOp.getRegion().push_back(new Block());
+    for (auto init : inits)
+      wsLoopOp.getRegion().front().addArgument(init.getType(), init.getLoc());
+    auto wsLoopInds = wsLoopOp.getRegion().front().getArguments();
+    inds.assign(wsLoopInds.begin(), wsLoopInds.end());
+
+    auto wsLoopOldpoint = builder.getInsertionPoint();
+    auto *wsLoopOldblock = builder.getInsertionBlock();
+
+    builder.setInsertionPointToStart(&wsLoopOp.getRegion().front());
+
+    auto wsLoopExecuteRegion =
+        builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
+    builder.create<omp::YieldOp>(loc, ValueRange());
+    wsLoopExecuteRegion.getRegion().push_back(new Block());
+    builder.setInsertionPointToStart(&wsLoopExecuteRegion.getRegion().back());
+
+    auto *wsLoopOldScope = allocationScope;
+    allocationScope = &wsLoopExecuteRegion.getRegion().back();
+
+    // Handle induction variables
+    std::map<VarDecl *, ValueCategory> prevInduction;
+    for (auto zp : zip(inds, fors->counters())) {
+      auto idx = builder.create<IndexCastOp>(
+          loc, getMLIRType(fors->getIterationVariable()->getType()),
+          std::get<0>(zp));
+      VarDecl *name =
+          cast<VarDecl>(cast<DeclRefExpr>(std::get<1>(zp))->getDecl());
+
+      if (params.find(name) != params.end()) {
+        prevInduction[name] = params[name];
+        params.erase(name);
       }
 
-      auto privAlloca = createAllocOp(elemTy, name, /*memspace*/ 0,
-                                      /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
-      ValueCategory privVC(privAlloca, /*isRef*/ true);
-
-      // Initialize to identity (0 for '+')
-      mlir::Value zero;
-      if (auto it = dyn_cast<mlir::IntegerType>(elemTy))
-        zero = builder.create<ConstantIntOp>(loc, 0, it.getWidth());
-      else if (auto ft = dyn_cast<mlir::FloatType>(elemTy))
-        zero = builder.create<arith::ConstantOp>(
-            loc, elemTy, builder.getFloatAttr(elemTy, 0.0));
+      bool LLVMABI = false;
+      bool isArray = false;
+      if (Glob.getMLIRType(
+                  Glob.CGM.getContext().getLValueReferenceType(name->getType()))
+              .isa<mlir::LLVM::LLVMPointerType>())
+        LLVMABI = true;
       else
-        zero = builder.create<ConstantIntOp>(loc, 0, 64);
-      privVC.store(loc, builder, zero);
+        Glob.getMLIRType(name->getType(), &isArray);
 
-      params[name] = privVC;
-      privateAccum[name] = privAlloca;
-    }
-  }
-
-  std::map<VarDecl *, ValueCategory> prevInduction;
-  for (auto zp : zip(inds, fors->counters())) {
-    auto idx = builder.create<IndexCastOp>(
-        loc, getMLIRType(fors->getIterationVariable()->getType()),
-        std::get<0>(zp));
-    VarDecl *name =
-        cast<VarDecl>(cast<DeclRefExpr>(std::get<1>(zp))->getDecl());
-
-    if (params.find(name) != params.end()) {
-      prevInduction[name] = params[name];
-      params.erase(name);
+      auto allocop = createAllocOp(idx.getType(), name, /*memtype*/ 0,
+                                   /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
+      params[name] = ValueCategory(allocop, true);
+      params[name].store(loc, builder, idx);
     }
 
-    bool LLVMABI = false;
-    bool isArray = false;
-    if (Glob.getMLIRType(
-                Glob.CGM.getContext().getLValueReferenceType(name->getType()))
-            .isa<mlir::LLVM::LLVMPointerType>())
-      LLVMABI = true;
-    else
-      Glob.getMLIRType(name->getType(), &isArray);
+    // Visit the loop body
+    Visit(fors->getBody());
 
-    auto allocop = createAllocOp(idx.getType(), name, /*memtype*/ 0,
-                                 /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
-    params[name] = ValueCategory(allocop, true);
-    params[name].store(loc, builder, idx);
+    builder.create<scf::YieldOp>(loc);
+    allocationScope = wsLoopOldScope;
+    builder.setInsertionPoint(wsLoopOldblock, wsLoopOldpoint);
+
+    // Restore previous variable mappings
+    for (auto pair : prevInduction)
+      params[pair.first] = pair.second;
+
+    builder.create<scf::YieldOp>(loc);
+    allocationScope = oldScope;
+    builder.setInsertionPoint(oldblock, oldpoint);
   }
-
-  // TODO: set loop context.
-  Visit(fors->getBody());
-
-  builder.create<scf::YieldOp>(loc);
-
-  allocationScope = oldScope;
-
-  // TODO: set the value of the iteration value to the final bound at the
-  // end of the loop.
-  builder.setInsertionPoint(oldblock, oldpoint);
-
-  // Combine private accumulators into shared variables using omp.atomic.update
-  if (!prevReduction.empty()) {
-    for (auto &pr : prevReduction) {
-      VarDecl *name = pr.first;
-      auto sharedVC = pr.second;
-      auto priv = privateAccum.lookup(name);
-      if (!priv)
-        continue;
-
-      auto privVal = builder.create<mlir::memref::LoadOp>(
-          loc, priv, std::vector<mlir::Value>({getConstantIndex(0)}));
-
-      mlir::Value xAddr = sharedVC.val;
-      mlir::Type elemTy;
-      if (auto mt = dyn_cast<mlir::MemRefType>(xAddr.getType()))
-        elemTy = mt.getElementType();
-      else if (auto pt = dyn_cast<mlir::LLVM::LLVMPointerType>(xAddr.getType()))
-        elemTy = pt.getElementType() ? pt.getElementType() : privVal.getType();
-      else
-        elemTy = privVal.getType();
-
-      auto aupd = builder.create<omp::AtomicUpdateOp>(
-          loc, xAddr, builder.getI64IntegerAttr(0), mlir::omp::ClauseMemoryOrderKindAttr());
-      auto &reg = aupd.getRegion();
-      auto *body = new Block();
-      body->addArgument(elemTy, loc);
-      reg.push_back(body);
-      {
-        mlir::OpBuilder::InsertionGuard guard(builder);
-        builder.setInsertionPointToStart(body);
-        mlir::Value cur = body->getArgument(0);
-        mlir::Value sum;
-        mlir::Value curVal = cur;
-        if (elemTy.isIntOrIndex())
-          sum = builder.create<arith::AddIOp>(loc, curVal, privVal);
-        else if (elemTy.isa<mlir::FloatType>())
-          sum = builder.create<arith::AddFOp>(loc, curVal, privVal);
-        else
-          sum = cur;
-        builder.create<omp::YieldOp>(loc, sum);
-      }
-
-      params[name] = sharedVC;
-    }
-  }
-
-  for (auto pair : prevInduction)
-    params[pair.first] = pair.second;
 
   return nullptr;
 }
