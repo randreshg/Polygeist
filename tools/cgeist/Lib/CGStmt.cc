@@ -1252,24 +1252,10 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
         loc, builder.getIndexType(), Visit(f).getValue(loc, builder)));
   }
 
-  // Determine if we can use scf::ParallelOp (only for static or no schedule)
-  bool useScfParallel =
-      !scheduleValAttr ||
-      scheduleValAttr.getValue() == mlir::omp::ClauseScheduleKind::Static;
-
   SmallVector<mlir::Value> inds;
-
-  if (useScfParallel) {
-    // Use scf::ParallelOp for static scheduling or no schedule clause.
-    // If a static schedule chunk is provided, use it as the step; otherwise
-    // reuse computed steps.
+  // Use scf::ParallelOp when there is no schedule clause.
+  if (!scheduleValAttr) {
     SmallVector<mlir::Value> steps(incs.begin(), incs.end());
-    if (scheduleChunkVar) {
-      auto stepIdx = builder.create<IndexCastOp>(loc, builder.getIndexType(),
-                                                 scheduleChunkVar);
-      steps.assign(inits.size(), stepIdx);
-    }
-
     auto parallelOp =
         builder.create<scf::ParallelOp>(loc, inits, finals, steps);
     inds = parallelOp.getInductionVars();
