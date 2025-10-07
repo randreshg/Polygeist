@@ -1255,6 +1255,51 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
   SmallVector<mlir::Value> inds;
   // Use scf::ParallelOp when there is no schedule clause.
   if (!scheduleValAttr) {
+    // Prepare per-thread private accumulators for reductions prior to the loop
+    std::map<VarDecl *, ValueCategory> prevReduction;
+    DenseMap<VarDecl *, mlir::Value> privateAccum;
+    if (!reductionVars.empty()) {
+      for (auto *name : reductionVars) {
+        if (params.find(name) == params.end())
+          continue;
+
+        prevReduction[name] = params[name];
+        params.erase(name);
+
+        bool isArray = false;
+        bool LLVMABI = false;
+        mlir::Type elemTy;
+        if (Glob.getMLIRType(Glob.CGM.getContext().getLValueReferenceType(
+                                 name->getType()))
+                .isa<mlir::LLVM::LLVMPointerType>()) {
+          LLVMABI = true;
+          bool undef;
+          elemTy = Glob.getMLIRType(name->getType(), &undef);
+        } else {
+          elemTy = Glob.getMLIRType(name->getType(), &isArray);
+        }
+
+        auto privAlloca =
+            createAllocOp(elemTy, name, /*memspace*/ 0,
+                          /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
+        ValueCategory privVC(privAlloca, /*isRef*/ true);
+
+        // Initialize to identity (0 for '+')
+        mlir::Value zero;
+        if (auto it = dyn_cast<mlir::IntegerType>(elemTy))
+          zero = builder.create<ConstantIntOp>(loc, 0, it.getWidth());
+        else if (auto ft = dyn_cast<mlir::FloatType>(elemTy))
+          zero = builder.create<arith::ConstantOp>(
+              loc, elemTy, builder.getFloatAttr(elemTy, 0.0));
+        else
+          zero = builder.create<ConstantIntOp>(loc, 0, 64);
+        privVC.store(loc, builder, zero);
+
+        params[name] = privVC;
+        privateAccum[name] = privAlloca;
+      }
+    }
+
     SmallVector<mlir::Value> steps(incs.begin(), incs.end());
     auto parallelOp =
         builder.create<scf::ParallelOp>(loc, inits, finals, steps);
@@ -1313,6 +1358,61 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
     for (auto pair : prevInduction)
       params[pair.first] = pair.second;
 
+    // Combine private accumulators back into shared variables using
+    // omp.atomic.update
+    if (!prevReduction.empty()) {
+      for (auto &pr : prevReduction) {
+        VarDecl *name = pr.first;
+        auto sharedVC = pr.second; // original shared lvalue (memref or pointer)
+        auto priv = privateAccum.lookup(name);
+        if (!priv)
+          continue;
+
+        // Load the thread-private accumulator value
+        auto privVal = builder.create<mlir::memref::LoadOp>(
+            loc, priv, std::vector<mlir::Value>({getConstantIndex(0)}));
+
+        // Build omp.atomic.update on the shared address
+        mlir::Value xAddr = sharedVC.val;
+
+        // Determine the element type for the update region block argument
+        mlir::Type elemTy;
+        if (auto mt = dyn_cast<mlir::MemRefType>(xAddr.getType()))
+          elemTy = mt.getElementType();
+        else if (auto pt =
+                     dyn_cast<mlir::LLVM::LLVMPointerType>(xAddr.getType()))
+          elemTy =
+              pt.getElementType() ? pt.getElementType() : privVal.getType();
+        else
+          elemTy = privVal.getType();
+
+        auto aupd = builder.create<omp::AtomicUpdateOp>(
+            loc, xAddr, mlir::IntegerAttr(),
+            mlir::omp::ClauseMemoryOrderKindAttr());
+        auto &reg = aupd.getRegion();
+        auto *body = new Block();
+        body->addArgument(elemTy, loc);
+        reg.push_back(body);
+        {
+          mlir::OpBuilder::InsertionGuard guard(builder);
+          builder.setInsertionPointToStart(body);
+          mlir::Value cur = body->getArgument(0);
+          mlir::Value sum;
+          mlir::Value curVal = cur;
+          if (elemTy.isIntOrIndex())
+            sum = builder.create<arith::AddIOp>(loc, curVal, privVal);
+          else if (elemTy.isa<mlir::FloatType>())
+            sum = builder.create<arith::AddFOp>(loc, curVal, privVal);
+          else
+            sum = cur; // unsupported type: no-op
+          builder.create<omp::YieldOp>(loc, sum);
+        }
+
+        // Restore shared mapping for subsequent code
+        params[name] = sharedVC;
+      }
+    }
+
   } else {
     // Use omp::ParallelOp + omp::WsLoopOp for non-static scheduling
     auto parallelOp = builder.create<omp::ParallelOp>(
@@ -1335,6 +1435,54 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
 
     auto *oldScope = allocationScope;
     allocationScope = &executeRegion.getRegion().back();
+
+    // Prepare per-thread private accumulators for reductions before wsloop.
+    std::map<VarDecl *, ValueCategory> prevReduction;
+    DenseMap<VarDecl *, mlir::Value> privateAccum;  // thread-private accum
+    DenseMap<VarDecl *, mlir::Value> iterationTemp; // per-iteration temp
+    if (!reductionVars.empty()) {
+      for (auto *name : reductionVars) {
+        if (params.find(name) == params.end())
+          continue;
+
+        prevReduction[name] = params[name];
+        params.erase(name);
+
+        bool isArray = false;
+        bool LLVMABI = false;
+        mlir::Type elemTy;
+        if (Glob.getMLIRType(Glob.CGM.getContext().getLValueReferenceType(
+                                 name->getType()))
+                .isa<mlir::LLVM::LLVMPointerType>()) {
+          LLVMABI = true;
+          bool undef;
+          elemTy = Glob.getMLIRType(name->getType(), &undef);
+        } else {
+          elemTy = Glob.getMLIRType(name->getType(), &isArray);
+        }
+
+        // Allocate thread-private accumulator and initialize to identity
+        auto privAlloca =
+            createAllocOp(elemTy, name, /*memspace*/ 0,
+                          /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
+        mlir::Value zero;
+        if (auto it = dyn_cast<mlir::IntegerType>(elemTy))
+          zero = builder.create<ConstantIntOp>(loc, 0, it.getWidth());
+        else if (auto ft = dyn_cast<mlir::FloatType>(elemTy))
+          zero = builder.create<arith::ConstantOp>(
+              loc, elemTy, builder.getFloatAttr(elemTy, 0.0));
+        else
+          zero = builder.create<ConstantIntOp>(loc, 0, 64);
+        builder.create<mlir::memref::StoreOp>(loc, zero, privAlloca);
+        privateAccum[name] = privAlloca;
+
+        // Allocate per-iteration temporary slot
+        auto iterAlloca =
+            createAllocOp(elemTy, name, /*memspace*/ 0,
+                          /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
+        iterationTemp[name] = iterAlloca;
+      }
+    }
 
     // Create the worksharing loop inside the parallel region
     auto wsLoopOp = builder.create<omp::WsLoopOp>(
@@ -1401,8 +1549,50 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
       params[name].store(loc, builder, idx);
     }
 
-    // Visit the loop body
+    // If reductions are present, map reduction vars to per-iteration temps
+    DenseMap<VarDecl *, ValueCategory> prevMappedReduction;
+    if (!prevReduction.empty()) {
+      for (auto &pr : prevReduction) {
+        VarDecl *name = pr.first;
+        auto iterAlloca = iterationTemp.lookup(name);
+        if (!iterAlloca)
+          continue;
+        if (params.find(name) != params.end())
+          prevMappedReduction[name] = params[name];
+        params[name] = ValueCategory(iterAlloca, /*isRef*/ true);
+      }
+    }
+
+    // Visit the loop body, which writes each iteration's contribution
     Visit(fors->getBody());
+
+    // Accumulate the per-iteration contribution into the thread-private accum
+    if (!prevReduction.empty()) {
+      for (auto &pr : prevReduction) {
+        VarDecl *name = pr.first;
+        auto iterAlloca = iterationTemp.lookup(name);
+        auto privAlloca = privateAccum.lookup(name);
+        if (!iterAlloca || !privAlloca)
+          continue;
+        auto iterVal = builder.create<mlir::memref::LoadOp>(
+            loc, iterAlloca, std::vector<mlir::Value>());
+        auto curAcc = builder.create<mlir::memref::LoadOp>(
+            loc, privAlloca, std::vector<mlir::Value>());
+        mlir::Value sum;
+        auto elemTy = iterVal.getType();
+        if (elemTy.isa<mlir::IntegerType>() || elemTy.isa<mlir::IndexType>())
+          sum = builder.create<arith::AddIOp>(loc, curAcc, iterVal);
+        else if (elemTy.isa<mlir::FloatType>())
+          sum = builder.create<arith::AddFOp>(loc, curAcc, iterVal);
+        else
+          sum = curAcc; // unsupported type: leave unchanged
+        builder.create<mlir::memref::StoreOp>(loc, sum, privAlloca);
+      }
+      // Restore any previous mappings of reduction vars
+      for (auto &pm : prevMappedReduction) {
+        params[pm.first] = pm.second;
+      }
+    }
 
     builder.create<scf::YieldOp>(loc);
     allocationScope = wsLoopOldScope;
@@ -1411,6 +1601,54 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
     // Restore previous variable mappings
     for (auto pair : prevInduction)
       params[pair.first] = pair.second;
+
+    // Combine thread-private accumulators once after the wsloop
+    if (!prevReduction.empty()) {
+      for (auto &pr : prevReduction) {
+        VarDecl *name = pr.first;
+        auto sharedVC = pr.second;
+        auto privAlloca = privateAccum.lookup(name);
+        if (!privAlloca)
+          continue;
+
+        auto privVal = builder.create<mlir::memref::LoadOp>(
+            loc, privAlloca, std::vector<mlir::Value>());
+
+        mlir::Value xAddr = sharedVC.val;
+        mlir::Type elemTy;
+        if (auto mt = dyn_cast<mlir::MemRefType>(xAddr.getType()))
+          elemTy = mt.getElementType();
+        else if (auto pt =
+                     dyn_cast<mlir::LLVM::LLVMPointerType>(xAddr.getType()))
+          elemTy =
+              pt.getElementType() ? pt.getElementType() : privVal.getType();
+        else
+          elemTy = privVal.getType();
+
+        auto aupd = builder.create<omp::AtomicUpdateOp>(
+            loc, xAddr, mlir::IntegerAttr(),
+            mlir::omp::ClauseMemoryOrderKindAttr());
+        auto &reg = aupd.getRegion();
+        auto *body = new Block();
+        body->addArgument(elemTy, loc);
+        reg.push_back(body);
+        {
+          mlir::OpBuilder::InsertionGuard guard(builder);
+          builder.setInsertionPointToStart(body);
+          mlir::Value cur = body->getArgument(0);
+          mlir::Value sum;
+          if (elemTy.isIntOrIndex())
+            sum = builder.create<arith::AddIOp>(loc, cur, privVal);
+          else if (elemTy.isa<mlir::FloatType>())
+            sum = builder.create<arith::AddFOp>(loc, cur, privVal);
+          else
+            sum = cur;
+          builder.create<omp::YieldOp>(loc, sum);
+        }
+        // Restore shared mapping
+        params[name] = sharedVC;
+      }
+    }
 
     builder.create<scf::YieldOp>(loc);
     allocationScope = oldScope;
