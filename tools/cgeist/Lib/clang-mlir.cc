@@ -3462,6 +3462,7 @@ ValueCategory MLIRScanner::VisitDeclRefExpr(DeclRefExpr *E) {
     if (Glob.getMLIRType(Glob.CGM.getContext().getPointerType(E->getType()))
             .isa<mlir::LLVM::LLVMPointerType>() ||
         name == "stderr" || name == "stdout" || name == "stdin" ||
+        name == "__stderrp" || name == "__stdoutp" || name == "__stdinp" ||
         (E->hasQualifier())) {
       return ValueCategory(builder.create<mlir::LLVM::AddressOfOp>(
                                loc, Glob.GetOrCreateLLVMGlobal(VD)),
@@ -5574,6 +5575,10 @@ mlir::Type MLIRASTConsumer::getMLIRType(clang::QualType qt, bool *implicitRef,
     }
     llvm::StructType *ST = cast<llvm::StructType>(LT);
 
+    // Note: Darwin stdio types like __sFILE/__sFILEX may be opaque.
+    // We handle opaque/empty-layout cases uniformly below via the generic
+    // fallback when 'types' is empty.
+
     SmallPtrSet<llvm::Type *, 4> Seen;
     bool notAllSame = false;
     for (size_t i = 0; i < ST->getNumElements(); i++) {
@@ -5584,8 +5589,9 @@ mlir::Type MLIRASTConsumer::getMLIRType(clang::QualType qt, bool *implicitRef,
 
     auto CXRD = dyn_cast<CXXRecordDecl>(RT->getDecl());
     if (isLLVMStructABI(RT->getDecl(), ST)) {
-      auto retTy = typeTranslator.translateType(anonymize(ST));
-      return retTy;
+      if (ST->isOpaque() || ST->getNumElements() == 0)
+        return typeTranslator.translateType(ST);
+      return typeTranslator.translateType(anonymize(ST));
     }
 
     /* TODO
@@ -5624,9 +5630,13 @@ mlir::Type MLIRASTConsumer::getMLIRType(clang::QualType qt, bool *implicitRef,
       types.push_back(ty);
     }
 
-    if (types.empty())
+    if (types.empty()) {
+      if (ST->isOpaque() || ST->getNumElements() == 0) {
+        return typeTranslator.translateType(ST);
+      }
       if (ST->getNumElements() == 1 && ST->getElementType(0U)->isIntegerTy(8))
         return typeTranslator.translateType(anonymize(ST));
+    }
 
     if (recursive) {
       auto LR = typeCache[RT].setBody(types, /*isPacked*/ false);
@@ -5641,6 +5651,10 @@ mlir::Type MLIRASTConsumer::getMLIRType(clang::QualType qt, bool *implicitRef,
     }
 
     if (!types.size()) {
+      // Incomplete or opaque records (e.g., Darwin's __sFILE/__sFILEX) may
+      // surface here with no discoverable fields. Treat them as opaque
+      // identified LLVM structs to keep pointer/global uses consistent and
+      // avoid forcing a memref ABI on an unknown layout.
       RT->dump();
       llvm::errs() << "ST: " << *ST << "\n";
       llvm::errs() << "fields\n";
@@ -5653,8 +5667,15 @@ mlir::Type MLIRASTConsumer::getMLIRType(clang::QualType qt, bool *implicitRef,
       llvm::errs() << "types\n";
       for (auto t : types)
         llvm::errs() << " --- " << t << "\n";
+
+      // Prefer the original named LLVM struct if available; otherwise fall
+      // back to translating the opaque llvm::StructType.
+      if (ST->hasName()) {
+        auto name = ST->getName().str();
+        return LLVM::LLVMStructType::getIdentified(module->getContext(), name);
+      }
+      return typeTranslator.translateType(ST);
     }
-    assert(types.size());
     if (implicitRef)
       *implicitRef = true;
     return mlir::MemRefType::get(types.size(), types[0]);

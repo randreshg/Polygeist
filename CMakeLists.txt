@@ -28,8 +28,8 @@ if(POLICY CMP0075)
   cmake_policy(SET CMP0075 NEW)
 endif()
 
-if(POLICY CMP0077)
-  cmake_policy(SET CMP0077 NEW)
+if(POLICY CMP0116)
+  cmake_policy(SET CMP0116 NEW)
 endif()
 
 option(LLVM_INCLUDE_TOOLS "Generate build targets for the LLVM tools." ON)
@@ -88,11 +88,11 @@ function(append value)
 endfunction()
 
 if( POLYGEIST_USE_LINKER )
-  append("-fuse-ld=${POLYGEIST_USE_LINKER}"
+  append("--ld-path=${POLYGEIST_USE_LINKER} -w"
     CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
   check_cxx_source_compiles("int main() { return 0; }" CXX_SUPPORTS_CUSTOM_LINKER)
   if ( NOT CXX_SUPPORTS_CUSTOM_LINKER )
-    message(FATAL_ERROR "Host compiler does not support '-fuse-ld=${LLVM_USE_LINKER}'")
+    message(FATAL_ERROR "Host compiler does not support '--ld-path=${POLYGEIST_USE_LINKER}'")
   endif()
 endif()
 
