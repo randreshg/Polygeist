@@ -610,17 +610,43 @@ MLIRScanner::VisitOMPTaskDirective(clang::OMPTaskDirective *task) {
           auto memrefType = base.getType().cast<mlir::MemRefType>();
           unsigned rank = memrefType.getRank();
 
-          // Verify dimension count matches array rank
-          if (sections.size() != rank) {
-            emitError(loc,
-                      "Array section dimensions (" + Twine(sections.size()) +
-                          ") don't match memref rank (" + Twine(rank) + ")");
-            assert(false && "Array section dimensions mismatch");
+          // Handle pointer indirection for extra dimensions
+          // If sections.size() > rank, we need to load through pointer levels
+          unsigned indirectionLevels = 0;
+          if (sections.size() > rank) {
+            indirectionLevels = sections.size() - rank;
+
+            // Process pointer indirections from outermost to innermost
+            for (unsigned i = 0; i < indirectionLevels; i++) {
+              auto *section = sections[sections.size() - 1 - i];
+
+              // Get the offset for this level
+              mlir::Value offset =
+                  section->getLowerBound()
+                      ? builder
+                            .create<arith::IndexCastOp>(
+                                loc, builder.getIndexType(),
+                                Visit(section->getLowerBound())
+                                    .getValue(loc, builder))
+                            .getResult()
+                      : builder.create<arith::ConstantIndexOp>(loc, 0)
+                            .getResult();
+
+              // Load the pointer at this offset
+              base = builder.create<mlir::memref::LoadOp>(
+                  loc, base, ArrayRef<mlir::Value>{offset});
+
+              // Update memrefType and rank for the loaded value
+              memrefType = base.getType().cast<mlir::MemRefType>();
+              rank = memrefType.getRank();
+            }
           }
 
-          // Prepare subview parameters for each dimension
+          // Prepare subview parameters for remaining dimensions
           SmallVector<mlir::Value> offsets, sizes, strides;
-          for (auto *section : llvm::reverse(sections)) {
+          // Only process the dimensions that remain after indirection
+          for (unsigned i = indirectionLevels; i < sections.size(); i++) {
+            auto *section = sections[sections.size() - 1 - i];
             // Lower bound (default 0)
             mlir::Value lb =
                 section->getLowerBound()
