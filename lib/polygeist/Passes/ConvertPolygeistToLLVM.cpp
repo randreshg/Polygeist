@@ -43,6 +43,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/Target/LLVMIR/Import.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/RegionUtils.h"
@@ -57,6 +58,7 @@
 #include <fstream>
 #include <limits>
 #include <numeric>
+#include <type_traits>
 
 #include "RuntimeWrapperUtils.h"
 
@@ -149,11 +151,16 @@ Type convertMemrefElementTypeForLLVMPointer(
 
 void visitVariableLengthMemrefOpLowering(Operation *op,
                                          ConversionPatternRewriter &rewriter) {
+  /// If it already has dynamic dims, we don't need to do anything.
+  /// Assume it was already visited
+  if (op->hasAttr("polygeist.dims"))
+    return;
+
   auto loc = op->getLoc();
   MemRefType originalType;
   SmallVector<Value, 4> opDimSizes;
   auto numDims = 0;
-  // Accept either a memref::AllocaOp or a polygeist::SubIndexOp.
+
   if (auto allocaOp = dyn_cast<memref::AllocaOp>(op)) {
     originalType = allocaOp.getType();
     if (originalType.getNumDynamicDims() <= 1)
@@ -165,6 +172,30 @@ void visitVariableLengthMemrefOpLowering(Operation *op,
 
     /// Get the dimSizes from the original type
     auto dynamicSizes = allocaOp.getDynamicSizes();
+    unsigned dynamicIdx = 0;
+    for (unsigned i = 0, e = originalType.getRank(); i < e; ++i) {
+      auto dim = originalType.getShape()[i];
+      if (ShapedType::isDynamic(dim)) {
+        Value dynDim = dynamicSizes[dynamicIdx++];
+        auto dynTy = dynDim.getType();
+        if (dynTy.isa<MemRefType>()) {
+          dynDim = rewriter.create<memref::LoadOp>(loc, dynDim, ValueRange{});
+        }
+        opDimSizes.push_back(dynDim);
+      } else {
+        opDimSizes.push_back(rewriter.create<arith::ConstantIndexOp>(loc, dim));
+      }
+    }
+
+  } else if (auto allocOp = dyn_cast<memref::AllocOp>(op)) {
+    originalType = allocOp.getType();
+    if (originalType.getNumDynamicDims() <= 1)
+      return;
+
+    numDims = originalType.getRank();
+    op->setAttr("polygeist.dims", rewriter.getI32IntegerAttr(numDims));
+
+    auto dynamicSizes = allocOp.getDynamicSizes();
     unsigned dynamicIdx = 0;
     for (unsigned i = 0, e = originalType.getRank(); i < e; ++i) {
       auto dim = originalType.getShape()[i];
@@ -3018,12 +3049,17 @@ struct ConvertPolygeistToLLVMPass
     }
 
     // Handle Variable length memref ops before conversion
-    m.walk([&](memref::AllocaOp allocaOp) {
+    SmallVector<Operation *, 4> allocLikeOps;
+    m.walk([&](Operation *op) {
+      if (isa<memref::AllocaOp>(op) || isa<memref::AllocOp>(op))
+        allocLikeOps.push_back(op);
+    });
+    for (auto op : allocLikeOps) {
       /// Create conversion pattern rewriter
       ConversionPatternRewriter rewriter(&getContext());
-      rewriter.setInsertionPoint(allocaOp);
-      visitVariableLengthMemrefOpLowering(allocaOp, rewriter);
-    });
+      rewriter.setInsertionPoint(op);
+      visitVariableLengthMemrefOpLowering(op, rewriter);
+    }
 
     LowerToLLVMOptions options(&getContext(),
                                dataLayoutAnalysis.getAtOrAbove(m));
