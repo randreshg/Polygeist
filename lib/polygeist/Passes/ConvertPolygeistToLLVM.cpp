@@ -1193,6 +1193,17 @@ public:
   LogicalResult
   matchAndRewrite(memref::AllocOp allocOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    // Check if this allocation has dynamic dimensions that need special
+    // handling
+    if (allocOp->hasAttr("polygeist.dims"))
+      return handleDynamicAlloc(allocOp, adaptor, rewriter);
+
+    return handleStaticAlloc(allocOp, adaptor, rewriter);
+  }
+
+private:
+  LogicalResult handleStaticAlloc(memref::AllocOp allocOp, OpAdaptor adaptor,
+                                  ConversionPatternRewriter &rewriter) const {
     auto module = allocOp->getParentOfType<ModuleOp>();
     Location loc = allocOp.getLoc();
     MemRefType originalType = allocOp.getType();
@@ -1215,6 +1226,57 @@ public:
           createIndexAttrConstant(rewriter, loc, rewriter.getIndexType(),
                                   innerSizes));
     }
+    Value elementSize = rewriter.create<polygeist::TypeSizeOp>(
+        loc, rewriter.getIndexType(),
+        mlir::TypeAttr::get(originalType.getElementType()));
+    Value size = rewriter.create<LLVM::MulOp>(loc, totalSize, elementSize);
+
+    if (auto F = module.lookupSymbol<mlir::func::FuncOp>("malloc")) {
+      Value allocated =
+          rewriter.create<func::CallOp>(loc, F, size).getResult(0);
+      rewriter.replaceOpWithNewOp<polygeist::Memref2PointerOp>(
+          allocOp, convertedType, allocated);
+    } else {
+      LLVM::LLVMFuncOp mallocFunc =
+          getTypeConverter()->getOptions().useGenericFunctions
+              ? LLVM::lookupOrCreateGenericAllocFn(module, getIndexType(),
+                                                   /*opaquePointers=*/true)
+              : LLVM::lookupOrCreateMallocFn(module, getIndexType(),
+                                             /*opaquePointers=*/true);
+      Value allocated =
+          rewriter.create<LLVM::CallOp>(loc, mallocFunc, size).getResult();
+      rewriter.replaceOpWithNewOp<LLVM::BitcastOp>(allocOp, convertedType,
+                                                   allocated);
+    }
+    return success();
+  }
+
+  LogicalResult handleDynamicAlloc(memref::AllocOp allocOp, OpAdaptor adaptor,
+                                   ConversionPatternRewriter &rewriter) const {
+    auto module = allocOp->getParentOfType<ModuleOp>();
+    Location loc = allocOp.getLoc();
+    MemRefType originalType = allocOp.getType();
+    auto convertedType = dyn_cast_or_null<LLVM::LLVMPointerType>(
+        getTypeConverter()->convertType(originalType));
+
+    if (!convertedType)
+      return rewriter.notifyMatchFailure(loc, "unsupported memref type");
+    if (adaptor.getAlignment() && adaptor.getAlignment().value() != 0)
+      return rewriter.notifyMatchFailure(loc, "unsupported alignment");
+
+    // Calculate total size properly handling dynamic dimensions
+    Value totalSize = rewriter.create<LLVM::ConstantOp>(
+        loc, rewriter.getIndexType(), rewriter.getIndexAttr(1));
+
+    unsigned dynIdx = 0;
+    for (int64_t dim : originalType.getShape()) {
+      Value dimVal = ShapedType::isDynamic(dim)
+                         ? adaptor.getDynamicSizes()[dynIdx++]
+                         : createIndexAttrConstant(
+                               rewriter, loc, rewriter.getIndexType(), dim);
+      totalSize = rewriter.create<LLVM::MulOp>(loc, totalSize, dimVal);
+    }
+
     Value elementSize = rewriter.create<polygeist::TypeSizeOp>(
         loc, rewriter.getIndexType(),
         mlir::TypeAttr::get(originalType.getElementType()));
