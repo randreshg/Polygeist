@@ -143,6 +143,10 @@ static cl::opt<bool> EmitLLVMDialect("emit-llvm-dialect", cl::init(false),
 static cl::opt<bool> PrintDebugInfo("print-debug-info", cl::init(false),
                                     cl::desc("Print debug info from MLIR"));
 
+static cl::opt<bool>
+    EmitDebugInfo("g", cl::init(false),
+                  cl::desc("Generate source-level debug information"));
+
 static cl::opt<bool> EmitAssembly("S", cl::init(false),
                                   cl::desc("Emit Assembly"));
 
@@ -498,6 +502,7 @@ int main(int argc, char **argv) {
           MLIRArgs.push_back(&argv[i][2]);
         } else if (ref == "-g") {
           LinkageArgs.push_back(argv[i]);
+          MLIRArgs.push_back(argv[i]);
         } else {
           MLIRArgs.push_back(argv[i]);
         }
@@ -612,7 +617,7 @@ int main(int argc, char **argv) {
 
   OpPrintingFlags flags;
   if (PrintDebugInfo)
-    flags.enableDebugInfo(/*pretty*/ false);
+    flags.enableDebugInfo(/*enable*/ true, /*prettyForm*/ false);
 
   if (ImmediateMLIR) {
     module->print(llvm::outs(), flags);
@@ -1226,12 +1231,59 @@ int main(int argc, char **argv) {
     }
 
   } else {
+    // Helper function to replace "-:" with actual source filename in locations
+    auto replaceStdinLocations = [&](std::string &output) {
+      // Get the first input filename
+      std::string sourceFile;
+      if (!files.empty() && files[0].size() > 0) {
+        // Convert to absolute path
+        llvm::SmallString<256> absolutePath;
+        if (llvm::sys::path::is_absolute(files[0])) {
+          sourceFile = files[0];
+        } else {
+          if (auto ec = llvm::sys::fs::real_path(files[0], absolutePath)) {
+            llvm::sys::fs::current_path(absolutePath);
+            llvm::sys::path::append(absolutePath, files[0]);
+          }
+          sourceFile = std::string(absolutePath);
+        }
+
+        // Replace all occurrences of '"-:' with '"sourceFile:'
+        std::string searchStr1 = "\"-:";
+        std::string replaceStr1 = "\"" + sourceFile + ":";
+        size_t pos = 0;
+        while ((pos = output.find(searchStr1, pos)) != std::string::npos) {
+          output.replace(pos, searchStr1.length(), replaceStr1);
+          pos += replaceStr1.length();
+        }
+
+        // Also replace 'loc("-:' pattern
+        std::string searchStr2 = "loc(\"-:";
+        std::string replaceStr2 = "loc(\"" + sourceFile + ":";
+        pos = 0;
+        while ((pos = output.find(searchStr2, pos)) != std::string::npos) {
+          output.replace(pos, searchStr2.length(), replaceStr2);
+          pos += replaceStr2.length();
+        }
+      }
+    };
+
     if (Output == "-") {
-      module->print(outs(), flags);
+      std::string output;
+      llvm::raw_string_ostream strOut(output);
+      module->print(strOut, flags);
+      strOut.flush();
+      replaceStdinLocations(output);
+      llvm::outs() << output;
     } else {
+      std::string output;
+      llvm::raw_string_ostream strOut(output);
+      module->print(strOut, flags);
+      strOut.flush();
+      replaceStdinLocations(output);
       std::error_code EC;
       llvm::raw_fd_ostream out(Output, EC);
-      module->print(out, flags);
+      out << output;
     }
   }
   return 0;

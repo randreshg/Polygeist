@@ -5426,6 +5426,17 @@ mlir::Location MLIRASTConsumer::getMLIRLocation(clang::SourceLocation loc) {
   auto colNumber = SM.getSpellingColumnNumber(spellingLoc);
   auto fileId = SM.getFilename(spellingLoc);
 
+  // Convert relative paths to absolute paths so MLIR preserves them during serialization
+  llvm::SmallString<256> absolutePath;
+  if (!fileId.empty() && !llvm::sys::path::is_absolute(fileId)) {
+    if (auto ec = llvm::sys::fs::real_path(fileId, absolutePath)) {
+      // If real_path fails, use current_path + filename
+      llvm::sys::fs::current_path(absolutePath);
+      llvm::sys::path::append(absolutePath, fileId);
+    }
+    fileId = StringRef(absolutePath);
+  }
+
   auto ctx = module->getContext();
   return FileLineColLoc::get(ctx, fileId, lineNumber, colNumber);
 }
@@ -6039,6 +6050,12 @@ static bool parseMLIR(const char *Argv0, std::vector<std::string> filenames,
   for (const auto &Include : Includes) {
     Argv.push_back("-include");
     Argv.emplace_back(Include);
+  }
+
+  // Add debug info flag if requested
+  extern llvm::cl::opt<bool> EmitDebugInfo;
+  if (EmitDebugInfo) {
+    Argv.push_back("-g");
   }
 
   Argv.push_back("-emit-ast");
