@@ -665,15 +665,17 @@ int main(int argc, char **argv) {
     optPM.addPass(mlir::createCSEPass());
     optPM.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
         canonicalizerConfig, {}, {}));
-    optPM.addPass(polygeist::createPolygeistMem2RegPass());
+      optPM.addPass(polygeist::createPolygeistMem2RegPass());
     optPM.addPass(mlir::createCSEPass());
     optPM.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
         canonicalizerConfig, {}, {}));
-    optPM.addPass(polygeist::createPolygeistMem2RegPass());
+    if (!Opt0)
+      optPM.addPass(polygeist::createPolygeistMem2RegPass());
     optPM.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
         canonicalizerConfig, {}, {}));
     optPM.addPass(polygeist::createRemoveTrivialUsePass());
-    optPM.addPass(polygeist::createPolygeistMem2RegPass());
+    if (!Opt0)
+      optPM.addPass(polygeist::createPolygeistMem2RegPass());
     optPM.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
         canonicalizerConfig, {}, {}));
     optPM.addPass(polygeist::createLoopRestructurePass());
