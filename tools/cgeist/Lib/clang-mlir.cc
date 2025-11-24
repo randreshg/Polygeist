@@ -2941,6 +2941,38 @@ ValueCategory MLIRScanner::VisitBinaryOperator(clang::BinaryOperator *BO) {
                                       std::vector<mlir::Value>({rhs_v})),
           /*isReference*/ false);
     } else {
+      auto coerceIntegerOperand = [&](mlir::Value val) -> mlir::Value {
+        auto resultType = getMLIRType(BO->getType());
+        if (resultType.isa<mlir::IndexType>())
+          return castToIndex(loc, val);
+
+        auto targetIntTy = resultType.dyn_cast<mlir::IntegerType>();
+        if (!targetIntTy)
+          return val;
+
+        if (val.getType() == resultType)
+          return val;
+        if (val.getType().isa<mlir::IndexType>())
+          return builder.create<arith::IndexCastOp>(loc, targetIntTy, val);
+
+        auto fromIntTy = val.getType().dyn_cast<mlir::IntegerType>();
+        if (!fromIntTy)
+          return val;
+
+        bool signedType = true;
+        if (auto bit = dyn_cast<clang::BuiltinType>(&*BO->getType()))
+          signedType = !bit->isUnsignedInteger();
+
+        if (fromIntTy.getWidth() < targetIntTy.getWidth()) {
+          if (signedType)
+            return builder.create<arith::ExtSIOp>(loc, targetIntTy, val);
+          return builder.create<arith::ExtUIOp>(loc, targetIntTy, val);
+        }
+        if (fromIntTy.getWidth() > targetIntTy.getWidth())
+          return builder.create<arith::TruncIOp>(loc, targetIntTy, val);
+        return val;
+      };
+
       if (auto lhs_c = lhs_v.getDefiningOp<ConstantIntOp>()) {
         if (auto rhs_c = rhs_v.getDefiningOp<ConstantIntOp>()) {
           return ValueCategory(
@@ -2949,6 +2981,8 @@ ValueCategory MLIRScanner::VisitBinaryOperator(clang::BinaryOperator *BO) {
               false);
         }
       }
+      lhs_v = coerceIntegerOperand(lhs_v);
+      rhs_v = coerceIntegerOperand(rhs_v);
       return ValueCategory(builder.create<AddIOp>(loc, lhs_v, rhs_v),
                            /*isReference*/ false);
     }
@@ -3004,6 +3038,40 @@ ValueCategory MLIRScanner::VisitBinaryOperator(clang::BinaryOperator *BO) {
                   mlir::TypeAttr::get(pt.getElementType()))));
       return ValueCategory(val, /*isReference*/ false);
     } else {
+      auto coerceIntegerOperand = [&](mlir::Value val) -> mlir::Value {
+        auto resultType = getMLIRType(BO->getType());
+        if (resultType.isa<mlir::IndexType>())
+          return castToIndex(loc, val);
+
+        auto targetIntTy = resultType.dyn_cast<mlir::IntegerType>();
+        if (!targetIntTy)
+          return val;
+
+        if (val.getType() == resultType)
+          return val;
+        if (val.getType().isa<mlir::IndexType>())
+          return builder.create<arith::IndexCastOp>(loc, targetIntTy, val);
+
+        auto fromIntTy = val.getType().dyn_cast<mlir::IntegerType>();
+        if (!fromIntTy)
+          return val;
+
+        bool signedType = true;
+        if (auto bit = dyn_cast<clang::BuiltinType>(&*BO->getType()))
+          signedType = !bit->isUnsignedInteger();
+
+        if (fromIntTy.getWidth() < targetIntTy.getWidth()) {
+          if (signedType)
+            return builder.create<arith::ExtSIOp>(loc, targetIntTy, val);
+          return builder.create<arith::ExtUIOp>(loc, targetIntTy, val);
+        }
+        if (fromIntTy.getWidth() > targetIntTy.getWidth())
+          return builder.create<arith::TruncIOp>(loc, targetIntTy, val);
+        return val;
+      };
+
+      lhs_v = coerceIntegerOperand(lhs_v);
+      rhs_v = coerceIntegerOperand(rhs_v);
       return ValueCategory(builder.create<SubIOp>(loc, lhs_v, rhs_v),
                            /*isReference*/ false);
     }

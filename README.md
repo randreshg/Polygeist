@@ -1,3 +1,32 @@
+# Polygeist Overview
+
+Polygeist is an MLIR-based front-end that “raises” C/C++ (and CUDA/OpenMP dialects) into higher-level MLIR representations. It hooks into Clang’s front-end, iterates over the AST nodes produced by Clang, and emits standard MLIR dialects (Affine/SCF/LLVM/GPU) instead of lowering directly to LLVM IR. Once in MLIR, you can run polyhedral optimizations, affine transformations, GPU transpilation passes, or lower back to LLVM and binaries. The repository contains:
+
+- **`cgeist`** – A Clang-based driver that parses C/C++ (including OpenMP), walks the Clang AST, and emits structured MLIR (Affine, SCF, GPU dialects).
+- **`polygeist-opt`** – Optimization passes that perform loop fusion, tiling, parallelization, and rewrite kernels into higher-level dialects.
+- **Polymer extensions** – Optional Pluto/ISL-backed passes for advanced polyhedral scheduling.
+- **GPU transpilation work** – Raising CUDA kernels to MLIR for retargeting (CPU↔GPU) and performance portability experiments.
+
+Typical use cases:
+
+1. **Raising existing C/C++** – Convert code bases into MLIR to leverage MLIR’s transformation ecosystem.
+2. **Automatic parallelization** – Run Pluto/Polymer passes to expose more parallelism, then lower to OpenMP or GPU dialects.
+3. **Transpilation** – Convert GPU kernels to CPU variants (or vice versa) using the MLIR GPU/Async lowerings.
+4. **Research playground** – Prototype new compiler passes or dialects without re-implementing a full front-end.
+
+Polygeist sits alongside upstream LLVM/MLIR; you either build it against a pre-existing LLVM tree (Option 1) or as an external LLVM project (Option 2, below). Everything else in this README focuses on building/testing.
+
+## Key Components & Directories
+
+- `tools/cgeist/` – Driver and Clang integration code.
+- `tools/polygeist-opt/` – Command-line optimizer hosting the Polygeist passes.
+- `tools/polymer/` – Optional Polygeist Polymer extensions (Pluto/ISL helpers).
+- `lib/` – MLIR dialects, analyses, and transform implementations.
+- `test/` – MLIR and Cgeist regression tests (`ninja check-polygeist-opt`, `ninja check-cgeist`).
+- `docs/` (within Polymer) – Additional Polygeist papers and scripts referenced by the citations at the end of this file.
+
+Polygeist relies on upstream LLVM/Clang/MLIR, so you must keep the LLVM submodule (or external checkout) in sync with the Polygeist revision you build.
+
 # Build instructions
 
 ## Requirements 
