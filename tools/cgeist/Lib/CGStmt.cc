@@ -1305,6 +1305,10 @@ MLIRScanner::VisitOMPParallelDirective(clang::OMPParallelDirective *par) {
           Visit(numThreadsClause->getNumThreads()).getValue(loc, builder);
       break;
     }
+    case llvm::omp::OMPC_shared:
+      // Shared variables are accessible by default in MLIR's OpenMP dialect.
+      // No special handling needed - variables from outer scope remain shared.
+      break;
     default:
       llvm::errs() << "may not handle omp clause " << (int)f->getClauseKind()
                    << "\n";
