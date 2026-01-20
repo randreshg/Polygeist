@@ -1449,348 +1449,184 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
   }
 
   SmallVector<mlir::Value> inds;
-  // Use scf::ParallelOp when there is no schedule clause and no reductions.
-  if (!scheduleValAttr && reductionVars.empty()) {
-    // Prepare per-thread private accumulators for reductions prior to the loop
-    std::map<VarDecl *, ValueCategory> prevReduction;
-    DenseMap<VarDecl *, mlir::Value> privateAccum;
-    if (!reductionVars.empty()) {
-      for (auto *name : reductionVars) {
-        if (params.find(name) == params.end())
-          continue;
+  /// Create OpenMP parallel + wsloop
+  std::map<VarDecl *, ValueCategory> prevReduction;
+  SmallVector<Attribute, 4> reductionDeclSymbols;
+  SmallVector<Value, 4> reductionAccumulators;
+  DenseMap<VarDecl *, mlir::Value> reductionAccumulatorForVar;
+  SmallVector<VarDecl *, 4> reductionOrder;
+  if (!reductionVars.empty()) {
+    for (auto *name : reductionVars) {
+      if (params.find(name) == params.end())
+        continue;
 
-        prevReduction[name] = params[name];
-        params.erase(name);
+      prevReduction[name] = params[name];
+      params.erase(name);
 
-        bool isArray = false;
-        bool LLVMABI = false;
-        mlir::Type elemTy;
-        if (Glob.getMLIRType(Glob.CGM.getContext().getLValueReferenceType(
-                                 name->getType()))
-                .isa<mlir::LLVM::LLVMPointerType>()) {
-          LLVMABI = true;
-          bool undef;
-          elemTy = Glob.getMLIRType(name->getType(), &undef);
-        } else {
-          elemTy = Glob.getMLIRType(name->getType(), &isArray);
-        }
-
-        auto privAlloca =
-            createAllocOp(elemTy, name, /*memspace*/ 0,
-                          /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
-        ValueCategory privVC(privAlloca, /*isRef*/ true);
-
-        // Initialize to identity (0 for '+')
-        mlir::Value zero;
-        if (auto it = dyn_cast<mlir::IntegerType>(elemTy))
-          zero = builder.create<ConstantIntOp>(loc, 0, it.getWidth());
-        else if (auto ft = dyn_cast<mlir::FloatType>(elemTy))
-          zero = builder.create<arith::ConstantOp>(
-              loc, elemTy, builder.getFloatAttr(elemTy, 0.0));
-        else
-          zero = builder.create<ConstantIntOp>(loc, 0, 64);
-        privVC.store(loc, builder, zero);
-
-        params[name] = privVC;
-        privateAccum[name] = privAlloca;
-      }
-    }
-
-    SmallVector<mlir::Value> steps(incs.begin(), incs.end());
-    auto parallelOp =
-        builder.create<scf::ParallelOp>(loc, inits, finals, steps);
-    inds = parallelOp.getInductionVars();
-
-    auto oldpoint = builder.getInsertionPoint();
-    auto *oldblock = builder.getInsertionBlock();
-
-    builder.setInsertionPointToStart(&parallelOp.getRegion().front());
-
-    auto executeRegion =
-        builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
-    executeRegion.getRegion().push_back(new Block());
-    builder.setInsertionPointToStart(&executeRegion.getRegion().back());
-
-    auto *oldScope = allocationScope;
-    allocationScope = &executeRegion.getRegion().back();
-
-    // Handle induction variables
-    std::map<VarDecl *, ValueCategory> prevInduction;
-    for (auto zp : zip(inds, fors->counters())) {
-      auto idx = builder.create<IndexCastOp>(
-          loc, getMLIRType(fors->getIterationVariable()->getType()),
-          std::get<0>(zp));
-      VarDecl *name =
-          cast<VarDecl>(cast<DeclRefExpr>(std::get<1>(zp))->getDecl());
-
-      if (params.find(name) != params.end()) {
-        prevInduction[name] = params[name];
-        params.erase(name);
-      }
-
-      bool LLVMABI = false;
       bool isArray = false;
-      if (Glob.getMLIRType(
-                  Glob.CGM.getContext().getLValueReferenceType(name->getType()))
-              .isa<mlir::LLVM::LLVMPointerType>())
-        LLVMABI = true;
-      else
-        Glob.getMLIRType(name->getType(), &isArray);
+      mlir::Type elemTy = Glob.getMLIRType(name->getType(), &isArray);
+      mlir::Value sharedAddr = prevReduction[name].val;
+      if (auto mt = dyn_cast<mlir::MemRefType>(sharedAddr.getType()))
+        elemTy = mt.getElementType();
+      else if (auto pt =
+                   dyn_cast<mlir::LLVM::LLVMPointerType>(sharedAddr.getType()))
+        if (pt.getElementType())
+          elemTy = pt.getElementType();
 
-      auto allocop = createAllocOp(idx.getType(), name, /*memtype*/ 0,
-                                   /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
-      params[name] = ValueCategory(allocop, true);
-      params[name].store(loc, builder, idx);
+      auto decl =
+          getOrCreateAddReductionDecl(builder, function.getOperation(), elemTy);
+      reductionDeclSymbols.push_back(
+          SymbolRefAttr::get(builder.getContext(), decl.getSymName()));
+
+      reductionAccumulators.push_back(sharedAddr);
+      reductionAccumulatorForVar[name] = sharedAddr;
+      reductionOrder.push_back(name);
     }
-
-    // Visit the loop body
-    Visit(fors->getBody());
-
-    builder.create<scf::YieldOp>(loc);
-    allocationScope = oldScope;
-    builder.setInsertionPoint(oldblock, oldpoint);
-
-    // Restore previous variable mappings
-    for (auto pair : prevInduction)
-      params[pair.first] = pair.second;
-
-    // Combine private accumulators back into shared variables using
-    // omp.atomic.update
-    if (!prevReduction.empty()) {
-      for (auto &pr : prevReduction) {
-        VarDecl *name = pr.first;
-        auto sharedVC = pr.second; // original shared lvalue (memref or pointer)
-        auto priv = privateAccum.lookup(name);
-        if (!priv)
-          continue;
-
-        // Load the thread-private accumulator value
-        auto privVal = builder.create<mlir::memref::LoadOp>(
-            loc, priv, std::vector<mlir::Value>({getConstantIndex(0)}));
-
-        // Build omp.atomic.update on the shared address
-        mlir::Value xAddr = sharedVC.val;
-
-        // Determine the element type for the update region block argument
-        mlir::Type elemTy;
-        if (auto mt = dyn_cast<mlir::MemRefType>(xAddr.getType()))
-          elemTy = mt.getElementType();
-        else if (auto pt =
-                     dyn_cast<mlir::LLVM::LLVMPointerType>(xAddr.getType()))
-          elemTy =
-              pt.getElementType() ? pt.getElementType() : privVal.getType();
-        else
-          elemTy = privVal.getType();
-
-        auto aupd = builder.create<omp::AtomicUpdateOp>(
-            loc, xAddr, mlir::IntegerAttr(),
-            mlir::omp::ClauseMemoryOrderKindAttr());
-        auto &reg = aupd.getRegion();
-        auto *body = new Block();
-        body->addArgument(elemTy, loc);
-        reg.push_back(body);
-        {
-          mlir::OpBuilder::InsertionGuard guard(builder);
-          builder.setInsertionPointToStart(body);
-          mlir::Value cur = body->getArgument(0);
-          mlir::Value sum;
-          mlir::Value curVal = cur;
-          if (elemTy.isIntOrIndex())
-            sum = builder.create<arith::AddIOp>(loc, curVal, privVal);
-          else if (elemTy.isa<mlir::FloatType>())
-            sum = builder.create<arith::AddFOp>(loc, curVal, privVal);
-          else
-            sum = cur; // unsupported type: no-op
-          builder.create<omp::YieldOp>(loc, sum);
-        }
-
-        // Restore shared mapping for subsequent code
-        params[name] = sharedVC;
-      }
-    }
-
-  } else {
-    // Use OpenMP parallel worksharing when scheduling clauses or reductions are
-    // present.
-    std::map<VarDecl *, ValueCategory> prevReduction;
-    SmallVector<Attribute, 4> reductionDeclSymbols;
-    SmallVector<Value, 4> reductionAccumulators;
-    DenseMap<VarDecl *, mlir::Value> reductionAccumulatorForVar;
-    SmallVector<VarDecl *, 4> reductionOrder;
-    if (!reductionVars.empty()) {
-      for (auto *name : reductionVars) {
-        if (params.find(name) == params.end())
-          continue;
-
-        prevReduction[name] = params[name];
-        params.erase(name);
-
-        bool isArray = false;
-        mlir::Type elemTy = Glob.getMLIRType(name->getType(), &isArray);
-        mlir::Value sharedAddr = prevReduction[name].val;
-        if (auto mt = dyn_cast<mlir::MemRefType>(sharedAddr.getType()))
-          elemTy = mt.getElementType();
-        else if (auto pt = dyn_cast<mlir::LLVM::LLVMPointerType>(
-                     sharedAddr.getType()))
-          if (pt.getElementType())
-            elemTy = pt.getElementType();
-
-        auto decl = getOrCreateAddReductionDecl(
-            builder, function.getOperation(), elemTy);
-        reductionDeclSymbols.push_back(
-            SymbolRefAttr::get(builder.getContext(), decl.getSymName()));
-
-        reductionAccumulators.push_back(sharedAddr);
-        reductionAccumulatorForVar[name] = sharedAddr;
-        reductionOrder.push_back(name);
-      }
-    }
-
-    auto parallelOp = builder.create<omp::ParallelOp>(
-        loc, /*if_expr_var*/ Value{}, /*num_threads*/ Value{},
-        /*allocate_vars*/ ValueRange{}, /*allocators_vars*/ ValueRange{},
-        /*reduction_vars*/ ValueRange{}, /*reductions*/ ArrayAttr{},
-        /*proc_bind_val*/ omp::ClauseProcBindKindAttr{});
-
-    auto oldpoint = builder.getInsertionPoint();
-    auto *oldblock = builder.getInsertionBlock();
-
-    parallelOp.getRegion().push_back(new Block());
-    builder.setInsertionPointToStart(&parallelOp.getRegion().front());
-
-    auto executeRegion =
-        builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
-    executeRegion.getRegion().push_back(new Block());
-    builder.create<omp::TerminatorOp>(loc);
-    builder.setInsertionPointToStart(&executeRegion.getRegion().back());
-
-    auto *oldScope = allocationScope;
-    allocationScope = &executeRegion.getRegion().back();
-
-    DenseMap<VarDecl *, mlir::Value> iterationTemp;
-
-    auto wsLoopOp = builder.create<omp::WsLoopOp>(
-        loc, inits, finals, incs,
-        /*linear_vars*/ ValueRange{},
-        /*linear_step_vars*/ ValueRange{},
-        /*reduction_vars*/ ValueRange{},
-        /*reductions*/ nullptr,
-        /*schedule_val*/ scheduleValAttr,
-        /*schedule_chunk_var*/ scheduleChunkVar,
-        /*schedule_modifier*/ scheduleModifierAttr,
-        /*simd_modifier*/ nullptr,
-        /*nowait*/ nullptr,
-        /*ordered_val*/ nullptr,
-        /*order_val*/ nullptr,
-        /*inclusive*/ nullptr);
-
-    if (!reductionDeclSymbols.empty()) {
-      wsLoopOp.setReductionsAttr(builder.getArrayAttr(reductionDeclSymbols));
-      wsLoopOp.getReductionVarsMutable().append(reductionAccumulators);
-    }
-
-    wsLoopOp.getRegion().push_back(new Block());
-    for (auto init : inits)
-      wsLoopOp.getRegion().front().addArgument(init.getType(), init.getLoc());
-    auto wsLoopInds = wsLoopOp.getRegion().front().getArguments();
-    inds.assign(wsLoopInds.begin(), wsLoopInds.end());
-
-    auto wsLoopOldpoint = builder.getInsertionPoint();
-    auto *wsLoopOldblock = builder.getInsertionBlock();
-
-    builder.setInsertionPointToStart(&wsLoopOp.getRegion().front());
-
-    auto wsLoopExecuteRegion =
-        builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
-    builder.create<omp::YieldOp>(loc, ValueRange());
-    wsLoopExecuteRegion.getRegion().push_back(new Block());
-    builder.setInsertionPointToStart(&wsLoopExecuteRegion.getRegion().back());
-
-    auto *wsLoopOldScope = allocationScope;
-    allocationScope = &wsLoopExecuteRegion.getRegion().back();
-
-    std::map<VarDecl *, ValueCategory> prevInduction;
-    for (auto zp : zip(inds, fors->counters())) {
-      auto idx = builder.create<IndexCastOp>(
-          loc, getMLIRType(fors->getIterationVariable()->getType()),
-          std::get<0>(zp));
-      VarDecl *name =
-          cast<VarDecl>(cast<DeclRefExpr>(std::get<1>(zp))->getDecl());
-
-      if (params.find(name) != params.end()) {
-        prevInduction[name] = params[name];
-        params.erase(name);
-      }
-
-      bool LLVMABI = false;
-      bool isArray = false;
-      if (Glob.getMLIRType(
-                  Glob.CGM.getContext().getLValueReferenceType(name->getType()))
-              .isa<mlir::LLVM::LLVMPointerType>())
-        LLVMABI = true;
-      else
-        Glob.getMLIRType(name->getType(), &isArray);
-
-      auto allocop = createAllocOp(idx.getType(), name, /*memtype*/ 0,
-                                   /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
-      params[name] = ValueCategory(allocop, true);
-      params[name].store(loc, builder, idx);
-    }
-
-    DenseMap<VarDecl *, ValueCategory> prevMappedReduction;
-    if (!prevReduction.empty()) {
-      for (auto &pr : prevReduction) {
-        VarDecl *name = pr.first;
-
-        bool LLVMABI = false;
-        bool isArray = false;
-        mlir::Type elemTy = Glob.getMLIRType(name->getType(), &isArray);
-        if (Glob.getMLIRType(Glob.CGM.getContext().getLValueReferenceType(
-                                 name->getType()))
-                .isa<mlir::LLVM::LLVMPointerType>())
-          LLVMABI = true;
-
-        if (params.find(name) != params.end())
-          prevMappedReduction[name] = params[name];
-
-        auto iterAlloca =
-            createAllocOp(elemTy, name, /*memspace*/ 0,
-                          /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
-        iterationTemp[name] = iterAlloca;
-        params[name] = ValueCategory(iterAlloca, /*isRef*/ true);
-      }
-    }
-
-    Visit(fors->getBody());
-
-    if (!prevReduction.empty()) {
-      for (auto *name : reductionOrder) {
-        auto iterAlloca = iterationTemp.lookup(name);
-        auto accumulator = reductionAccumulatorForVar.lookup(name);
-        if (!iterAlloca || !accumulator)
-          continue;
-        ValueCategory iterVC(iterAlloca, /*isReference*/ true);
-        mlir::Value produced = iterVC.getValue(loc, builder);
-        builder.create<mlir::omp::ReductionOp>(loc, produced, accumulator);
-      }
-      for (auto &pm : prevMappedReduction)
-        params[pm.first] = pm.second;
-    }
-
-    builder.create<scf::YieldOp>(loc);
-    allocationScope = wsLoopOldScope;
-    builder.setInsertionPoint(wsLoopOldblock, wsLoopOldpoint);
-
-    for (auto pair : prevInduction)
-      params[pair.first] = pair.second;
-
-    builder.create<scf::YieldOp>(loc);
-    allocationScope = oldScope;
-    builder.setInsertionPoint(oldblock, oldpoint);
-
-    for (auto &pr : prevReduction)
-      params[pr.first] = pr.second;
   }
+
+  auto parallelOp = builder.create<omp::ParallelOp>(
+      loc, /*if_expr_var*/ Value{}, /*num_threads*/ Value{},
+      /*allocate_vars*/ ValueRange{}, /*allocators_vars*/ ValueRange{},
+      /*reduction_vars*/ ValueRange{}, /*reductions*/ ArrayAttr{},
+      /*proc_bind_val*/ omp::ClauseProcBindKindAttr{});
+
+  auto oldpoint = builder.getInsertionPoint();
+  auto *oldblock = builder.getInsertionBlock();
+
+  parallelOp.getRegion().push_back(new Block());
+  builder.setInsertionPointToStart(&parallelOp.getRegion().front());
+
+  auto executeRegion =
+      builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
+  executeRegion.getRegion().push_back(new Block());
+  builder.create<omp::TerminatorOp>(loc);
+  builder.setInsertionPointToStart(&executeRegion.getRegion().back());
+
+  auto *oldScope = allocationScope;
+  allocationScope = &executeRegion.getRegion().back();
+
+  DenseMap<VarDecl *, mlir::Value> iterationTemp;
+
+  auto wsLoopOp =
+      builder.create<omp::WsLoopOp>(loc, inits, finals, incs,
+                                    /*linear_vars*/ ValueRange{},
+                                    /*linear_step_vars*/ ValueRange{},
+                                    /*reduction_vars*/ ValueRange{},
+                                    /*reductions*/ nullptr,
+                                    /*schedule_val*/ scheduleValAttr,
+                                    /*schedule_chunk_var*/ scheduleChunkVar,
+                                    /*schedule_modifier*/ scheduleModifierAttr,
+                                    /*simd_modifier*/ nullptr,
+                                    /*nowait*/ nullptr,
+                                    /*ordered_val*/ nullptr,
+                                    /*order_val*/ nullptr,
+                                    /*inclusive*/ nullptr);
+
+  if (!reductionDeclSymbols.empty()) {
+    wsLoopOp.setReductionsAttr(builder.getArrayAttr(reductionDeclSymbols));
+    wsLoopOp.getReductionVarsMutable().append(reductionAccumulators);
+  }
+
+  wsLoopOp.getRegion().push_back(new Block());
+  for (auto init : inits)
+    wsLoopOp.getRegion().front().addArgument(init.getType(), init.getLoc());
+  auto wsLoopInds = wsLoopOp.getRegion().front().getArguments();
+  inds.assign(wsLoopInds.begin(), wsLoopInds.end());
+
+  auto wsLoopOldpoint = builder.getInsertionPoint();
+  auto *wsLoopOldblock = builder.getInsertionBlock();
+
+  builder.setInsertionPointToStart(&wsLoopOp.getRegion().front());
+
+  auto wsLoopExecuteRegion =
+      builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
+  builder.create<omp::YieldOp>(loc, ValueRange());
+  wsLoopExecuteRegion.getRegion().push_back(new Block());
+  builder.setInsertionPointToStart(&wsLoopExecuteRegion.getRegion().back());
+
+  auto *wsLoopOldScope = allocationScope;
+  allocationScope = &wsLoopExecuteRegion.getRegion().back();
+
+  std::map<VarDecl *, ValueCategory> prevInduction;
+  for (auto zp : zip(inds, fors->counters())) {
+    auto idx = builder.create<IndexCastOp>(
+        loc, getMLIRType(fors->getIterationVariable()->getType()),
+        std::get<0>(zp));
+    VarDecl *name =
+        cast<VarDecl>(cast<DeclRefExpr>(std::get<1>(zp))->getDecl());
+
+    if (params.find(name) != params.end()) {
+      prevInduction[name] = params[name];
+      params.erase(name);
+    }
+
+    bool LLVMABI = false;
+    bool isArray = false;
+    if (Glob.getMLIRType(
+                Glob.CGM.getContext().getLValueReferenceType(name->getType()))
+            .isa<mlir::LLVM::LLVMPointerType>())
+      LLVMABI = true;
+    else
+      Glob.getMLIRType(name->getType(), &isArray);
+
+    auto allocop = createAllocOp(idx.getType(), name, /*memtype*/ 0,
+                                 /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
+    params[name] = ValueCategory(allocop, true);
+    params[name].store(loc, builder, idx);
+  }
+
+  DenseMap<VarDecl *, ValueCategory> prevMappedReduction;
+  if (!prevReduction.empty()) {
+    for (auto &pr : prevReduction) {
+      VarDecl *name = pr.first;
+
+      bool LLVMABI = false;
+      bool isArray = false;
+      mlir::Type elemTy = Glob.getMLIRType(name->getType(), &isArray);
+      if (Glob.getMLIRType(
+                  Glob.CGM.getContext().getLValueReferenceType(name->getType()))
+              .isa<mlir::LLVM::LLVMPointerType>())
+        LLVMABI = true;
+
+      if (params.find(name) != params.end())
+        prevMappedReduction[name] = params[name];
+
+      auto iterAlloca = createAllocOp(elemTy, name, /*memspace*/ 0,
+                                      /*isArray*/ isArray, /*LLVMABI*/ LLVMABI);
+      iterationTemp[name] = iterAlloca;
+      params[name] = ValueCategory(iterAlloca, /*isRef*/ true);
+    }
+  }
+
+  Visit(fors->getBody());
+
+  if (!prevReduction.empty()) {
+    for (auto *name : reductionOrder) {
+      auto iterAlloca = iterationTemp.lookup(name);
+      auto accumulator = reductionAccumulatorForVar.lookup(name);
+      if (!iterAlloca || !accumulator)
+        continue;
+      ValueCategory iterVC(iterAlloca, /*isReference*/ true);
+      mlir::Value produced = iterVC.getValue(loc, builder);
+      builder.create<mlir::omp::ReductionOp>(loc, produced, accumulator);
+    }
+    for (auto &pm : prevMappedReduction)
+      params[pm.first] = pm.second;
+  }
+
+  builder.create<scf::YieldOp>(loc);
+  allocationScope = wsLoopOldScope;
+  builder.setInsertionPoint(wsLoopOldblock, wsLoopOldpoint);
+
+  for (auto pair : prevInduction)
+    params[pair.first] = pair.second;
+
+  builder.create<scf::YieldOp>(loc);
+  allocationScope = oldScope;
+  builder.setInsertionPoint(oldblock, oldpoint);
+
+  for (auto &pr : prevReduction)
+    params[pr.first] = pr.second;
 
   return nullptr;
 }
