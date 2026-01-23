@@ -1119,6 +1119,25 @@ struct SimplifySubIndexUsers : public OpRewritePattern<SubIndexOp> {
               storeOp, storeOp.getValue(), subindex.getSource(), indices);
           changed = true;
         }
+        // Handle token container pattern: SubIndexOp stored as VALUE to alloca
+        else if (storeOp.getValue() == subindex && storeOp.getIndices().empty()) {
+          // Check if storing to a simple alloca (rank-0 memref of memref)
+          if (auto allocaOp = storeOp.getMemref().getDefiningOp<memref::AllocaOp>()) {
+            auto allocaType = allocaOp.getType().dyn_cast<MemRefType>();
+            if (allocaType && allocaType.getRank() == 0) {
+              // Find all loads from this alloca and replace with subindex
+              for (OpOperand &allocaUse : llvm::make_early_inc_range(allocaOp->getUses())) {
+                if (auto loadFromAlloca = dyn_cast<memref::LoadOp>(allocaUse.getOwner())) {
+                  if (loadFromAlloca.getMemref() == allocaOp.getResult() &&
+                      loadFromAlloca.getIndices().empty()) {
+                    rewriter.replaceOp(loadFromAlloca, subindex.getResult());
+                    changed = true;
+                  }
+                }
+              }
+            }
+          }
+        }
       } else if (auto storeOp = dyn_cast<memref::AtomicRMWOp>(use.getOwner())) {
         if (storeOp.getMemref() == subindex) {
           SmallVector<Value, 4> indices = storeOp.getIndices();
