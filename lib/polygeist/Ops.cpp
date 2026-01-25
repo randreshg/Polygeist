@@ -1121,18 +1121,50 @@ struct SimplifySubIndexUsers : public OpRewritePattern<SubIndexOp> {
         }
         // Handle token container pattern: SubIndexOp stored as VALUE to alloca
         else if (storeOp.getValue() == subindex && storeOp.getIndices().empty()) {
-          // Check if storing to a simple alloca (rank-0 memref of memref)
           if (auto allocaOp = storeOp.getMemref().getDefiningOp<memref::AllocaOp>()) {
             auto allocaType = allocaOp.getType().dyn_cast<MemRefType>();
             if (allocaType && allocaType.getRank() == 0) {
-              // Find all loads from this alloca and replace with subindex
-              for (OpOperand &allocaUse : llvm::make_early_inc_range(allocaOp->getUses())) {
+              // Safety check: ensure only one store to this alloca
+              int storeCount = 0;
+              for (OpOperand &u : allocaOp->getUses()) {
+                if (auto s = dyn_cast<memref::StoreOp>(u.getOwner())) {
+                  if (s.getMemref() == allocaOp.getResult())
+                    storeCount++;
+                }
+              }
+              if (storeCount != 1)
+                continue;
+
+              // Collect loads and verify safety
+              SmallVector<memref::LoadOp, 4> loadsToReplace;
+              bool canReplace = true;
+              Region *subindexRegion = subindex->getParentRegion();
+
+              for (OpOperand &allocaUse : allocaOp->getUses()) {
                 if (auto loadFromAlloca = dyn_cast<memref::LoadOp>(allocaUse.getOwner())) {
                   if (loadFromAlloca.getMemref() == allocaOp.getResult() &&
                       loadFromAlloca.getIndices().empty()) {
-                    rewriter.replaceOp(loadFromAlloca, subindex.getResult());
-                    changed = true;
+                    // Check type compatibility
+                    if (loadFromAlloca.getResult().getType() != subindex.getResult().getType()) {
+                      canReplace = false;
+                      break;
+                    }
+                    // Check region containment - subindex must be visible at load
+                    Region *loadRegion = loadFromAlloca->getParentRegion();
+                    if (!subindexRegion->isAncestor(loadRegion) &&
+                        subindexRegion != loadRegion) {
+                      canReplace = false;
+                      break;
+                    }
+                    loadsToReplace.push_back(loadFromAlloca);
                   }
+                }
+              }
+
+              if (canReplace && !loadsToReplace.empty()) {
+                for (auto loadFromAlloca : loadsToReplace) {
+                  rewriter.replaceOp(loadFromAlloca, subindex.getResult());
+                  changed = true;
                 }
               }
             }
