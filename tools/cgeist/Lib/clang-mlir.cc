@@ -5887,6 +5887,22 @@ mlir::Type MLIRASTConsumer::getMLIRType(clang::QualType qt, bool *implicitRef,
     if (isa<clang::ArrayType>(PTT)) {
       if (subType.isa<MemRefType>()) {
         assert(subRef);
+        if (allowMerge && isa<clang::PointerType>(t)) {
+          // Pointer-to-array (NOT reference-to-array): prepend outer dim.
+          // float (*)[M] → memref<?xMxf32> (can index multiple rows).
+          // float (&)[M] → memref<Mxf32> (single array reference, no outer dim).
+          auto mt = subType.cast<MemRefType>();
+          // Only for arrays of scalars (contiguous ND data).
+          // Skip arrays of pointers/memrefs (e.g., double *[4]).
+          if (!mt.getElementType().isa<MemRefType,
+                                       LLVM::LLVMPointerType>()) {
+            auto shape2 = std::vector<int64_t>(mt.getShape());
+            shape2.insert(shape2.begin(), outer);
+            return mlir::MemRefType::get(shape2, mt.getElementType(),
+                                         MemRefLayoutAttrInterface(),
+                                         mt.getMemorySpace());
+          }
+        }
         return subType;
       } else {
         if (!CStyleMemRef)
