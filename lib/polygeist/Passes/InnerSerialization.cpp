@@ -89,7 +89,7 @@ void InnerSerialization::runOnOperation() {
   mlir::RewritePatternSet rpl(getOperation()->getContext());
   rpl.add<ParSerialize>(getOperation()->getContext());
   GreedyRewriteConfig config;
-  config.maxIterations = 47;
+  config.setMaxIterations(47);
   (void)applyPatternsGreedily(getOperation(), std::move(rpl), config);
 }
 
@@ -97,7 +97,7 @@ void Serialization::runOnOperation() {
   mlir::RewritePatternSet rpl(getOperation()->getContext());
   rpl.add<Serialize>(getOperation()->getContext());
   GreedyRewriteConfig config;
-  config.maxIterations = 47;
+  config.setMaxIterations(47);
   (void)applyPatternsGreedily(getOperation(), std::move(rpl), config);
 }
 

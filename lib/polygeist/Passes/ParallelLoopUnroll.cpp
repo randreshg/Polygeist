@@ -24,7 +24,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
-#include "mlir/Support/MathExtras.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/Transforms/RegionUtils.h"
 #include "polygeist/Ops.h"
 #include "polygeist/Passes/Passes.h"
@@ -343,7 +343,7 @@ LogicalResult mlir::polygeist::scfParallelUnrollByFactor(
       llvm_unreachable("expected positive loop bounds and step");
       return failure();
     }
-    int64_t upperBoundRem = mlir::mod(ubCst, unrollFactor);
+    int64_t upperBoundRem = ubCst % unrollFactor;
 
     if (upperBoundRem && !generateEpilogueLoop) {
       return failure();

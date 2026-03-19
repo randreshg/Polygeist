@@ -12,7 +12,7 @@
 #include "polygeist/Passes/Passes.h"
 #include "polygeist/Passes/Passes.h.inc"
 
-#include "mlir/Dialect/Affine/Passes.h"
+#include "mlir/Dialect/Affine/Transforms/Passes.h"
 #include "mlir/Dialect/Async/IR/Async.h"
 #include "mlir/Dialect/DLTI/DLTI.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -46,10 +46,10 @@ struct PolygeistCanonicalizePass
                             ArrayRef<std::string> disabledPatterns,
                             ArrayRef<std::string> enabledPatterns)
       : config(config) {
-    this->topDownProcessingEnabled = config.useTopDownTraversal;
-    this->enableRegionSimplification = config.enableRegionSimplification;
-    this->maxIterations = config.maxIterations;
-    this->maxNumRewrites = config.maxNumRewrites;
+    this->topDownProcessingEnabled = config.getUseTopDownTraversal();
+    this->enableRegionSimplification = config.getRegionSimplificationLevel() != GreedySimplifyRegionLevel::Disabled;
+    this->maxIterations = config.getMaxIterations();
+    this->maxNumRewrites = config.getMaxNumRewrites();
     this->disabledPatterns = disabledPatterns;
     this->enabledPatterns = enabledPatterns;
   }
@@ -57,10 +57,12 @@ struct PolygeistCanonicalizePass
   /// execution.
   LogicalResult initialize(MLIRContext *context) override {
     // Set the config from possible pass options set in the meantime.
-    config.useTopDownTraversal = topDownProcessingEnabled;
-    config.enableRegionSimplification = enableRegionSimplification;
-    config.maxIterations = maxIterations;
-    config.maxNumRewrites = maxNumRewrites;
+    config.setUseTopDownTraversal(topDownProcessingEnabled);
+    config.setRegionSimplificationLevel(enableRegionSimplification
+        ? GreedySimplifyRegionLevel::Aggressive
+        : GreedySimplifyRegionLevel::Disabled);
+    config.setMaxIterations(maxIterations);
+    config.setMaxNumRewrites(maxNumRewrites);
 
     // The polygeist dialect is marked as a dependency to this pass and that
     // causes all of the custom canonicalizers (which are not neccessarily only

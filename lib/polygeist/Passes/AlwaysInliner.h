@@ -77,7 +77,7 @@ struct AlwaysInlinerInterface : public mlir::InlinerInterface {
   /// Handle the given inlined terminator by replacing it with a new operation
   /// as necessary.
   void handleTerminator(mlir::Operation *op,
-                        mlir::ArrayRef<mlir::Value> valuesToRepl) const final {
+                        mlir::ValueRange valuesToRepl) const final {
     // Only "std.return" needs to be handled here.
     auto returnOp = mlir::cast<mlir::func::ReturnOp>(op);
 
@@ -107,7 +107,19 @@ struct AlwaysInlinerInterface : public mlir::InlinerInterface {
     return;
   if (targetRegion->empty())
     return;
-  if (inlineCall(interface, caller, callableOp, targetRegion,
+  auto cloneCallback = [](mlir::OpBuilder &builder, mlir::Region *src,
+                          mlir::Block *inlineBlock, mlir::Block *postInsertBlock,
+                          mlir::IRMapping &mapper,
+                          bool shouldCloneInlinedRegion) {
+    mlir::Region *insertRegion = inlineBlock->getParent();
+    if (shouldCloneInlinedRegion)
+      src->cloneInto(insertRegion, postInsertBlock->getIterator(), mapper);
+    else
+      insertRegion->getBlocks().splice(postInsertBlock->getIterator(),
+                                       src->getBlocks(), src->begin(),
+                                       src->end());
+  };
+  if (inlineCall(interface, cloneCallback, caller, callableOp, targetRegion,
                  /*shouldCloneInlinedRegion=*/true)
           .succeeded()) {
     caller.erase();

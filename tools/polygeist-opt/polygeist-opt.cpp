@@ -25,6 +25,7 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/InitAllDialects.h"
 #include "mlir/InitAllPasses.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
@@ -65,16 +66,8 @@ int main(int argc, char **argv) {
   mlir::registerpolygeistPasses();
   mlir::func::registerInlinerExtension(registry);
 
-  // Register the standard passes we want.
-  mlir::registerCSEPass();
-  mlir::registerConvertAffineToStandardPass();
-  mlir::registerSCCPPass();
-  mlir::registerInlinerPass();
-  mlir::registerCanonicalizerPass();
-  mlir::registerSymbolDCEPass();
-  mlir::registerLoopInvariantCodeMotionPass();
-  mlir::registerConvertSCFToOpenMPPass();
-  mlir::affine::registerAffinePasses();
+  // Register all standard passes.
+  mlir::registerAllPasses();
 
   registry.addExtension(+[](MLIRContext *ctx, LLVM::LLVMDialect *dialect) {
     LLVM::LLVMFunctionType::attachInterface<MemRefInsider>(*ctx);

@@ -299,7 +299,7 @@ void OpenMPOpt::runOnOperation() {
   rpl.add<CombineParallel, ParallelForInterchange, ParallelIfInterchange>(
       getOperation()->getContext());
   GreedyRewriteConfig config;
-  config.maxIterations = 47;
+  config.setMaxIterations(47);
   (void)applyPatternsGreedily(getOperation(), std::move(rpl), config);
 }
 

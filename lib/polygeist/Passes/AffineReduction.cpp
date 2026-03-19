@@ -5,7 +5,7 @@
 #include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Affine/Passes.h"
+#include "mlir/Dialect/Affine/Transforms/Passes.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -179,7 +179,7 @@ struct AffineForReductionIter : public OpRewritePattern<affine::AffineForOp> {
     affine::AffineForOp newForOp = rewriter.create<affine::AffineForOp>(
         forOp.getLoc(), forOp.getLowerBoundOperands(), forOp.getLowerBoundMap(),
         forOp.getUpperBoundOperands(), forOp.getUpperBoundMap(),
-        forOp.getStep(), newIterArgs);
+        forOp.getStepAsInt(), newIterArgs);
 
     // remove load operation inside the for.
     size_t i = 0;

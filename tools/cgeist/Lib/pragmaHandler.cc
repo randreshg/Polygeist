@@ -14,7 +14,7 @@
 #include "clang/Lex/LexDiagnostic.h"
 #include "clang/Lex/LiteralSupport.h"
 #include "clang/Lex/Preprocessor.h"
-#include "clang/Parse/ParseDiagnostic.h"
+#include "clang/Basic/DiagnosticParse.h"
 #include "clang/Sema/Sema.h"
 
 #include "llvm/ADT/DenseMap.h"

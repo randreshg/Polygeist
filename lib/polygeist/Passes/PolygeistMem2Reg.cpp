@@ -1089,8 +1089,12 @@ bool PolygeistMem2Reg::forwardStoreToLoad(
   Type elType;
   if (auto MT = dyn_cast<MemRefType>(AI.getType()))
     elType = MT.getElementType();
-  else
-    elType = cast<LLVM::LLVMPointerType>(AI.getType()).getElementType();
+  else if (auto allocaOp = AI.getDefiningOp<LLVM::AllocaOp>())
+    elType = allocaOp.getElemType();
+  else {
+    // Opaque pointer without a known element type; bail out.
+    return false;
+  }
 
   std::deque<std::pair<mlir::Value, /*indexed*/ bool>> list = {{AI, false}};
 

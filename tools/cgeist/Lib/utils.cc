@@ -51,7 +51,7 @@ Operation *mlirclang::replaceFuncByOperation(
     llvm::errs() << " warning unregistered dialect op: " << opName << "\n";
   }
 
-  if (opName.startswith("memref"))
+  if (opName.starts_with("memref"))
     return buildLinalgOp(opName, b, input, output);
 
   // NOTE: The attributes of the provided FuncOp is ignored.

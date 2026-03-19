@@ -132,6 +132,7 @@ namespace LLVM {
 class LLVMDialect;
 }
 
+#define GEN_PASS_DECL
 #define GEN_PASS_REGISTRATION
 #include "polygeist/Passes/Passes.h.inc"
 

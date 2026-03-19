@@ -73,7 +73,7 @@ void UndefOp::getCanonicalizationPatterns(RewritePatternSet &results,
 struct NoopResource : public SideEffects::Resource::Base<NoopResource> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(NoopResource)
 
-  StringRef getName() final { return "<NoopResource>"; }
+  StringRef getName() const final { return "<NoopResource>"; }
 };
 
 void NoopOp::build(OpBuilder &builder, OperationState &result,
@@ -351,12 +351,12 @@ bool collectEffects(Operation *op,
         effects.emplace_back(MemoryEffects::Effect::get<MemoryEffects::Read>());
 
         bool first = true;
-        for (auto arg : cop.getArgOperands()) {
+        for (auto &operand : cop.getArgOperandsMutable()) {
           if (first)
-            effects.emplace_back(::mlir::MemoryEffects::Read::get(), arg,
+            effects.emplace_back(::mlir::MemoryEffects::Read::get(), &operand,
                                  ::mlir::SideEffects::DefaultResource::get());
           else
-            effects.emplace_back(::mlir::MemoryEffects::Write::get(), arg,
+            effects.emplace_back(::mlir::MemoryEffects::Write::get(), &operand,
                                  ::mlir::SideEffects::DefaultResource::get());
           first = false;
         }
@@ -367,19 +367,19 @@ bool collectEffects(Operation *op,
         // Global read
         effects.emplace_back(MemoryEffects::Effect::get<MemoryEffects::Read>());
 
-        for (auto argp : llvm::enumerate(cop.getArgOperands())) {
-          auto arg = argp.value();
+        for (auto argp : llvm::enumerate(cop.getArgOperandsMutable())) {
+          auto &operand = argp.value();
           auto idx = argp.index();
           if (idx == 0) {
-            effects.emplace_back(::mlir::MemoryEffects::Read::get(), arg,
+            effects.emplace_back(::mlir::MemoryEffects::Read::get(), &operand,
                                  ::mlir::SideEffects::DefaultResource::get());
-            effects.emplace_back(::mlir::MemoryEffects::Write::get(), arg,
+            effects.emplace_back(::mlir::MemoryEffects::Write::get(), &operand,
                                  ::mlir::SideEffects::DefaultResource::get());
           } else if (idx == 1) {
-            effects.emplace_back(::mlir::MemoryEffects::Read::get(), arg,
+            effects.emplace_back(::mlir::MemoryEffects::Read::get(), &operand,
                                  ::mlir::SideEffects::DefaultResource::get());
           } else
-            effects.emplace_back(::mlir::MemoryEffects::Write::get(), arg,
+            effects.emplace_back(::mlir::MemoryEffects::Write::get(), &operand,
                                  ::mlir::SideEffects::DefaultResource::get());
         }
 
@@ -389,22 +389,22 @@ bool collectEffects(Operation *op,
         // Global read
         effects.emplace_back(
             MemoryEffects::Effect::get<MemoryEffects::Write>());
-        for (auto arg : cop.getArgOperands()) {
-          effects.emplace_back(::mlir::MemoryEffects::Read::get(), arg,
+        for (auto &operand : cop.getArgOperandsMutable()) {
+          effects.emplace_back(::mlir::MemoryEffects::Read::get(), &operand,
                                ::mlir::SideEffects::DefaultResource::get());
         }
         return true;
       }
       if (*callee == "free") {
-        for (auto arg : cop.getArgOperands()) {
-          effects.emplace_back(::mlir::MemoryEffects::Free::get(), arg,
+        for (auto &operand : cop.getArgOperandsMutable()) {
+          effects.emplace_back(::mlir::MemoryEffects::Free::get(), &operand,
                                ::mlir::SideEffects::DefaultResource::get());
         }
         return true;
       }
       if (*callee == "strlen") {
-        for (auto arg : cop.getArgOperands()) {
-          effects.emplace_back(::mlir::MemoryEffects::Read::get(), arg,
+        for (auto &operand : cop.getArgOperandsMutable()) {
+          effects.emplace_back(::mlir::MemoryEffects::Read::get(), &operand,
                                ::mlir::SideEffects::DefaultResource::get());
         }
         return true;
@@ -1060,27 +1060,18 @@ struct SimplifySubIndexUsers : public OpRewritePattern<SubIndexOp> {
         if (loadOp.getMemref() == subindex) {
           SmallVector<Value, 4> indices = loadOp.getIndices();
           if (cast<MemRefType>(subindex.getType()).getShape().size() ==
-              subindex.getSource()
-                  cast<MemRefType>(.getType())
-                  .getShape()
-                  .size()) {
+              cast<MemRefType>(subindex.getSource().getType()).getShape().size()) {
             assert(indices.size() > 0);
             indices[0] = rewriter.create<AddIOp>(subindex.getLoc(), indices[0],
                                                  subindex.getIndex());
           } else {
             assert(cast<MemRefType>(subindex.getType()).getShape().size() +
                        1 ==
-                   subindex.getSource()
-                       cast<MemRefType>(.getType())
-                       .getShape()
-                       .size());
+                   cast<MemRefType>(subindex.getSource().getType()).getShape().size());
             indices.insert(indices.begin(), subindex.getIndex());
           }
 
-          assert(subindex.getSource()
-                     cast<MemRefType>(.getType())
-                     .getShape()
-                     .size() == indices.size());
+          assert(cast<MemRefType>(subindex.getSource().getType()).getShape().size() == indices.size());
           rewriter.replaceOpWithNewOp<memref::LoadOp>(
               loadOp, subindex.getSource(), indices);
           changed = true;
@@ -1089,26 +1080,17 @@ struct SimplifySubIndexUsers : public OpRewritePattern<SubIndexOp> {
         if (storeOp.getMemref() == subindex) {
           SmallVector<Value, 4> indices = storeOp.getIndices();
           if (cast<MemRefType>(subindex.getType()).getShape().size() ==
-              subindex.getSource()
-                  cast<MemRefType>(.getType())
-                  .getShape()
-                  .size()) {
+              cast<MemRefType>(subindex.getSource().getType()).getShape().size()) {
             assert(indices.size() > 0);
             indices[0] = rewriter.create<AddIOp>(subindex.getLoc(), indices[0],
                                                  subindex.getIndex());
           } else {
             assert(cast<MemRefType>(subindex.getType()).getShape().size() +
                        1 ==
-                   subindex.getSource()
-                       cast<MemRefType>(.getType())
-                       .getShape()
-                       .size());
+                   cast<MemRefType>(subindex.getSource().getType()).getShape().size());
             indices.insert(indices.begin(), subindex.getIndex());
           }
-          assert(subindex.getSource()
-                     cast<MemRefType>(.getType())
-                     .getShape()
-                     .size() == indices.size());
+          assert(cast<MemRefType>(subindex.getSource().getType()).getShape().size() == indices.size());
           rewriter.replaceOpWithNewOp<memref::StoreOp>(
               storeOp, storeOp.getValue(), subindex.getSource(), indices);
           changed = true;
@@ -1168,26 +1150,17 @@ struct SimplifySubIndexUsers : public OpRewritePattern<SubIndexOp> {
         if (storeOp.getMemref() == subindex) {
           SmallVector<Value, 4> indices = storeOp.getIndices();
           if (cast<MemRefType>(subindex.getType()).getShape().size() ==
-              subindex.getSource()
-                  cast<MemRefType>(.getType())
-                  .getShape()
-                  .size()) {
+              cast<MemRefType>(subindex.getSource().getType()).getShape().size()) {
             assert(indices.size() > 0);
             indices[0] = rewriter.create<AddIOp>(subindex.getLoc(), indices[0],
                                                  subindex.getIndex());
           } else {
             assert(cast<MemRefType>(subindex.getType()).getShape().size() +
                        1 ==
-                   subindex.getSource()
-                       cast<MemRefType>(.getType())
-                       .getShape()
-                       .size());
+                   cast<MemRefType>(subindex.getSource().getType()).getShape().size());
             indices.insert(indices.begin(), subindex.getIndex());
           }
-          assert(subindex.getSource()
-                     cast<MemRefType>(.getType())
-                     .getShape()
-                     .size() == indices.size());
+          assert(cast<MemRefType>(subindex.getSource().getType()).getShape().size() == indices.size());
           rewriter.replaceOpWithNewOp<memref::AtomicRMWOp>(
               storeOp, storeOp.getType(), storeOp.getKind(), storeOp.getValue(),
               subindex.getSource(), indices);
@@ -1197,10 +1170,7 @@ struct SimplifySubIndexUsers : public OpRewritePattern<SubIndexOp> {
                      dyn_cast<affine::AffineStoreOp>(use.getOwner())) {
         if (storeOp.getMemref() == subindex) {
           if (cast<MemRefType>(subindex.getType()).getShape().size() + 1 ==
-              subindex.getSource()
-                  cast<MemRefType>(.getType())
-                  .getShape()
-                  .size()) {
+              cast<MemRefType>(subindex.getSource().getType()).getShape().size()) {
 
             std::vector<Value> indices;
             auto map = storeOp.getAffineMap();
@@ -1212,10 +1182,7 @@ struct SimplifySubIndexUsers : public OpRewritePattern<SubIndexOp> {
               indices.push_back(apply->getResult(0));
             }
 
-            assert(subindex.getSource()
-                       cast<MemRefType>(.getType())
-                       .getShape()
-                       .size() == indices.size());
+            assert(cast<MemRefType>(subindex.getSource().getType()).getShape().size() == indices.size());
             rewriter.replaceOpWithNewOp<memref::StoreOp>(
                 storeOp, storeOp.getValue(), subindex.getSource(), indices);
             changed = true;
@@ -1225,10 +1192,7 @@ struct SimplifySubIndexUsers : public OpRewritePattern<SubIndexOp> {
                      dyn_cast<affine::AffineLoadOp>(use.getOwner())) {
         if (storeOp.getMemref() == subindex) {
           if (cast<MemRefType>(subindex.getType()).getShape().size() + 1 ==
-              subindex.getSource()
-                  cast<MemRefType>(.getType())
-                  .getShape()
-                  .size()) {
+              cast<MemRefType>(subindex.getSource().getType()).getShape().size()) {
 
             std::vector<Value> indices;
             auto map = storeOp.getAffineMap();
@@ -1239,10 +1203,7 @@ struct SimplifySubIndexUsers : public OpRewritePattern<SubIndexOp> {
                   storeOp.getMapOperands());
               indices.push_back(apply->getResult(0));
             }
-            assert(subindex.getSource()
-                       cast<MemRefType>(.getType())
-                       .getShape()
-                       .size() == indices.size());
+            assert(cast<MemRefType>(subindex.getSource().getType()).getShape().size() == indices.size());
             rewriter.replaceOpWithNewOp<memref::LoadOp>(
                 storeOp, subindex.getSource(), indices);
             changed = true;
@@ -1296,19 +1257,13 @@ struct SimplifySubViewUsers : public OpRewritePattern<memref::SubViewOp> {
         if (loadOp.getMemref() == subindex) {
           SmallVector<Value, 4> indices = loadOp.getIndices();
           if (cast<MemRefType>(subindex.getType()).getShape().size() ==
-              subindex.getSource()
-                  cast<MemRefType>(.getType())
-                  .getShape()
-                  .size()) {
+              cast<MemRefType>(subindex.getSource().getType()).getShape().size()) {
             assert(indices.size() > 0);
             indices[0] =
                 rewriter.create<AddIOp>(subindex.getLoc(), indices[0], off);
           } else {
             if (cast<MemRefType>(subindex.getType()).getShape().size() + 1 ==
-                subindex.getSource()
-                    cast<MemRefType>(.getType())
-                    .getShape()
-                    .size())
+                cast<MemRefType>(subindex.getSource().getType()).getShape().size())
               indices.insert(indices.begin(), off);
             else {
               assert(indices.size() > 0);
@@ -1316,10 +1271,7 @@ struct SimplifySubViewUsers : public OpRewritePattern<memref::SubViewOp> {
             }
           }
 
-          assert(subindex.getSource()
-                     cast<MemRefType>(.getType())
-                     .getShape()
-                     .size() == indices.size());
+          assert(cast<MemRefType>(subindex.getSource().getType()).getShape().size() == indices.size());
           rewriter.replaceOpWithNewOp<memref::LoadOp>(
               loadOp, subindex.getSource(), indices);
           changed = true;
@@ -1328,19 +1280,13 @@ struct SimplifySubViewUsers : public OpRewritePattern<memref::SubViewOp> {
         if (storeOp.getMemref() == subindex) {
           SmallVector<Value, 4> indices = storeOp.getIndices();
           if (cast<MemRefType>(subindex.getType()).getShape().size() ==
-              subindex.getSource()
-                  cast<MemRefType>(.getType())
-                  .getShape()
-                  .size()) {
+              cast<MemRefType>(subindex.getSource().getType()).getShape().size()) {
             assert(indices.size() > 0);
             indices[0] =
                 rewriter.create<AddIOp>(subindex.getLoc(), indices[0], off);
           } else {
             if (cast<MemRefType>(subindex.getType()).getShape().size() + 1 ==
-                subindex.getSource()
-                    cast<MemRefType>(.getType())
-                    .getShape()
-                    .size())
+                cast<MemRefType>(subindex.getSource().getType()).getShape().size())
               indices.insert(indices.begin(), off);
             else {
               if (indices.size() == 0) {
@@ -1352,17 +1298,11 @@ struct SimplifySubViewUsers : public OpRewritePattern<memref::SubViewOp> {
             }
           }
 
-          if (subindex.getSource()
-                  cast<MemRefType>(.getType())
-                  .getShape()
-                  .size() != indices.size()) {
+          if (cast<MemRefType>(subindex.getSource().getType()).getShape().size() != indices.size()) {
             llvm::errs() << " storeOp: " << storeOp << " - subidx: " << subindex
                          << "\n";
           }
-          assert(subindex.getSource()
-                     cast<MemRefType>(.getType())
-                     .getShape()
-                     .size() == indices.size());
+          assert(cast<MemRefType>(subindex.getSource().getType()).getShape().size() == indices.size());
           rewriter.replaceOpWithNewOp<memref::StoreOp>(
               storeOp, storeOp.getValue(), subindex.getSource(), indices);
           changed = true;
@@ -1371,10 +1311,7 @@ struct SimplifySubViewUsers : public OpRewritePattern<memref::SubViewOp> {
                      dyn_cast<affine::AffineStoreOp>(use.getOwner())) {
         if (storeOp.getMemref() == subindex) {
           if (cast<MemRefType>(subindex.getType()).getShape().size() + 1 ==
-              subindex.getSource()
-                  cast<MemRefType>(.getType())
-                  .getShape()
-                  .size()) {
+              cast<MemRefType>(subindex.getSource().getType()).getShape().size()) {
 
             std::vector<Value> indices;
             auto map = storeOp.getAffineMap();
@@ -1386,10 +1323,7 @@ struct SimplifySubViewUsers : public OpRewritePattern<memref::SubViewOp> {
               indices.push_back(apply->getResult(0));
             }
 
-            assert(subindex.getSource()
-                       cast<MemRefType>(.getType())
-                       .getShape()
-                       .size() == indices.size());
+            assert(cast<MemRefType>(subindex.getSource().getType()).getShape().size() == indices.size());
             rewriter.replaceOpWithNewOp<memref::StoreOp>(
                 storeOp, storeOp.getValue(), subindex.getSource(), indices);
             changed = true;
@@ -1399,10 +1333,7 @@ struct SimplifySubViewUsers : public OpRewritePattern<memref::SubViewOp> {
                      dyn_cast<affine::AffineLoadOp>(use.getOwner())) {
         if (storeOp.getMemref() == subindex) {
           if (cast<MemRefType>(subindex.getType()).getShape().size() + 1 ==
-              subindex.getSource()
-                  cast<MemRefType>(.getType())
-                  .getShape()
-                  .size()) {
+              cast<MemRefType>(subindex.getSource().getType()).getShape().size()) {
 
             std::vector<Value> indices;
             auto map = storeOp.getAffineMap();
@@ -1413,10 +1344,7 @@ struct SimplifySubViewUsers : public OpRewritePattern<memref::SubViewOp> {
                   storeOp.getMapOperands());
               indices.push_back(apply->getResult(0));
             }
-            assert(subindex.getSource()
-                       cast<MemRefType>(.getType())
-                       .getShape()
-                       .size() == indices.size());
+            assert(cast<MemRefType>(subindex.getSource().getType()).getShape().size() == indices.size());
             rewriter.replaceOpWithNewOp<memref::LoadOp>(
                 storeOp, subindex.getSource(), indices);
             changed = true;
@@ -1593,17 +1521,10 @@ public:
       return failure();
 
     Value idx[] = {src.getIndex()};
-    auto PET = cast<LLVM::LLVMPointerType>(op.getType()).getElementType();
     auto MET = cast<MemRefType>(src.getSource().getType()).getElementType();
-    if (PET != MET) {
-      Value ps;
-      if (PET)
-        // non-opaque pointer
-        ps = rewriter.create<polygeist::TypeSizeOp>(
-            op.getLoc(), rewriter.getIndexType(), mlir::TypeAttr::get(PET));
-      else
-        // opaque pointer
-        ps = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), 1);
+    // All pointers are opaque in LLVM 23 — scale index by memref element size
+    {
+      Value ps = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), 1);
       auto ms = rewriter.create<polygeist::TypeSizeOp>(
           op.getLoc(), rewriter.getIndexType(), mlir::TypeAttr::get(MET));
       idx[0] = rewriter.create<MulIOp>(op.getLoc(), idx[0], ms);
@@ -1611,20 +1532,12 @@ public:
     }
     idx[0] = rewriter.create<arith::IndexCastOp>(op.getLoc(),
                                                  rewriter.getI64Type(), idx[0]);
-    if (PET)
-      // non-opaque pointer
-      rewriter.replaceOpWithNewOp<LLVM::GEPOp>(
-          op, op.getType(),
-          rewriter.create<Memref2PointerOp>(op.getLoc(), op.getType(),
-                                            src.getSource()),
-          idx);
-    else
-      // opaque pointer
-      rewriter.replaceOpWithNewOp<LLVM::GEPOp>(
-          op, op.getType(), rewriter.getI8Type(),
-          rewriter.create<Memref2PointerOp>(op.getLoc(), op.getType(),
-                                            src.getSource()),
-          idx);
+    // opaque pointer — use i8 as GEP element type
+    rewriter.replaceOpWithNewOp<LLVM::GEPOp>(
+        op, op.getType(), rewriter.getI8Type(),
+        rewriter.create<Memref2PointerOp>(op.getLoc(), op.getType(),
+                                          src.getSource()),
+        idx);
     return success();
   }
 };
@@ -1820,7 +1733,7 @@ public:
     else {
       auto FT = cast<FloatType>(elTy);
       val = rewriter.create<arith::ConstantFloatOp>(
-          op.getLoc(), APFloat(FT.getFloatSemantics(), "0"), FT);
+          op.getLoc(), FT, APFloat(FT.getFloatSemantics(), "0"));
     }
 
     auto forOp = rewriter.create<scf::ForOp>(
@@ -1981,7 +1894,8 @@ public:
         return failure();
 
     Value val = src.getSource();
-    assert(cast<LLVM::LLVMPointerType>(val.getType()).isOpaque());
+    // All LLVM pointers are opaque in LLVM 23.
+    assert(isa<LLVM::LLVMPointerType>(val.getType()));
 
     Value idx = nullptr;
     auto shape = mt.getShape();
@@ -2161,7 +2075,7 @@ struct IfAndLazy : public OpRewritePattern<scf::IfOp> {
           return failure();
     }
 
-    rewriter.startRootUpdate(nextIf);
+    rewriter.startOpModification(nextIf);
     nextIf->moveBefore(yield);
     nextIf.getConditionMutable().assign(nextIfCondition);
     for (auto it : llvm::zip(prevIf.getResults(), yield.getOperands())) {
@@ -2169,12 +2083,12 @@ struct IfAndLazy : public OpRewritePattern<scf::IfOp> {
            llvm::make_early_inc_range(std::get<0>(it).getUses()))
         if (nextIf.getThenRegion().isAncestor(
                 use.getOwner()->getParentRegion())) {
-          rewriter.startRootUpdate(use.getOwner());
+          rewriter.startOpModification(use.getOwner());
           use.set(std::get<1>(it));
-          rewriter.finalizeRootUpdate(use.getOwner());
+          rewriter.finalizeOpModification(use.getOwner());
         }
     }
-    rewriter.finalizeRootUpdate(nextIf);
+    rewriter.finalizeOpModification(nextIf);
 
     // Handle else region
     if (!nextIf.getElseRegion().empty()) {
@@ -2286,8 +2200,8 @@ struct MoveIntoIfs : public OpRewritePattern<scf::IfOp> {
         return failure();
     }
 
-    rewriter.startRootUpdate(nextIf);
-    rewriter.startRootUpdate(prevOp);
+    rewriter.startOpModification(nextIf);
+    rewriter.startOpModification(prevOp);
     prevOp->moveBefore(thenUse ? &nextIf.thenBlock()->front()
                                : &nextIf.elseBlock()->front());
     for (OpOperand &use : llvm::make_early_inc_range(prevOp->getUses())) {
@@ -2317,8 +2231,8 @@ struct MoveIntoIfs : public OpRewritePattern<scf::IfOp> {
             storeOp, storeOp.getValue(), storeOp.getMemref(), indices);
       }
     }
-    rewriter.finalizeRootUpdate(prevOp);
-    rewriter.finalizeRootUpdate(nextIf);
+    rewriter.finalizeOpModification(prevOp);
+    rewriter.finalizeOpModification(nextIf);
     return success();
   }
 };
@@ -2886,7 +2800,7 @@ struct InductiveVarRemoval : public OpRewritePattern<scf::ForOp> {
           break;
       }
       if (legal) {
-        rewriter.updateRootInPlace(forOp, [&] {
+        rewriter.modifyOpInPlace(forOp, [&] {
           std::get<1>(tup).replaceAllUsesWith(std::get<2>(tup));
         });
         changed = true;
@@ -3747,7 +3661,7 @@ struct AffineIfSinking : public OpRewritePattern<affine::AffineIfOp> {
     rewriter.setInsertionPointToStart(newIf.getThenBlock());
     for (auto o : llvm::reverse(toSink)) {
       auto nop = rewriter.clone(*o, map);
-      rewriter.replaceOpWithinBlock(o, nop->getResults(), newIf.getThenBlock());
+      rewriter.replaceOpUsesWithinBlock(o, nop->getResults(), newIf.getThenBlock());
     }
     for (auto i : par.getIVs()) {
       i.replaceUsesWithIf(c0, [&](OpOperand &user) {
@@ -3976,14 +3890,14 @@ struct CombineAffineIfs : public OpRewritePattern<affine::AffineIfOp> {
            llvm::make_early_inc_range(std::get<0>(it).getUses())) {
         if (nextThen && nextThen->getParent()->isAncestor(
                             use.getOwner()->getParentRegion())) {
-          rewriter.startRootUpdate(use.getOwner());
+          rewriter.startOpModification(use.getOwner());
           use.set(std::get<1>(it));
-          rewriter.finalizeRootUpdate(use.getOwner());
+          rewriter.finalizeOpModification(use.getOwner());
         } else if (nextElse && nextElse->getParent()->isAncestor(
                                    use.getOwner()->getParentRegion())) {
-          rewriter.startRootUpdate(use.getOwner());
+          rewriter.startOpModification(use.getOwner());
           use.set(std::get<2>(it));
-          rewriter.finalizeRootUpdate(use.getOwner());
+          rewriter.finalizeOpModification(use.getOwner());
         }
       }
 
@@ -4954,7 +4868,8 @@ struct RemoveAffineParallelSingleIter
 
       affineLoop.getRegion().getBlocks().push_back(Tmp);
       if (rewriter.getListener())
-        rewriter.getListener()->notifyBlockCreated(Tmp);
+        rewriter.getListener()->notifyBlockInserted(Tmp, /*previous=*/nullptr,
+                                                       /*previousIt=*/{});
 
       rewriter.mergeBlocks(op.getBody(), affineLoop.getBody(), replacements);
       rewriter.replaceOp(op, affineLoop->getResults());
@@ -5119,8 +5034,8 @@ template <typename T> struct BufferElimination : public OpRewritePattern<T> {
 
             assert(otherBuf.getType() == op.getType());
 
-            rewriter.replaceOpWithIf(
-                op, otherBuf, nullptr, [&](OpOperand &use) {
+            rewriter.replaceUsesWithIf(
+                op, otherBuf, [&](OpOperand &use) {
                   Operation *owner = use.getOwner();
                   while (owner &&
                          owner->getBlock() != copyIntoBuffer->getBlock()) {
@@ -5329,8 +5244,8 @@ struct AffineBufferElimination : public OpRewritePattern<T> {
           auto i = idxp.index();
           if (!idx.isValue) {
             if (auto ald = dyn_cast<affine::AffineLoadOp>(ld)) {
-              if (auto ac = ald.getAffineMap()
-                                dyn_cast<AffineConstantExpr>(.getResult(i))) {
+              if (auto ac = dyn_cast<AffineConstantExpr>(
+                      ald.getAffineMap().getResult(i))) {
                 if (idx == ac.getValue())
                   continue;
               }
@@ -5646,7 +5561,7 @@ struct AffineBufferElimination : public OpRewritePattern<T> {
                 // Overwriting the original buffer means that the reload is not
                 // valid.
                 readResourcesT.emplace_back(
-                    ::mlir::MemoryEffects::Read::get(), op,
+                    ::mlir::MemoryEffects::Read::get(), op->getResult(0),
                     ::mlir::SideEffects::DefaultResource::get());
               }
               for (auto res : readResourcesT) {

@@ -355,7 +355,7 @@ struct ForOpInductionReplacement : public OpRewritePattern<scf::ForOp> {
               forOp.getLoc(), std::get<1>(it).getType(), replacement);
         }
 
-        rewriter.updateRootInPlace(
+        rewriter.modifyOpInPlace(
             forOp, [&] { std::get<1>(it).replaceAllUsesWith(replacement); });
         canonicalize = true;
       }
@@ -395,7 +395,7 @@ struct ForOpInductionReplacement : public OpRewritePattern<scf::ForOp> {
               forOp.getLoc(), std::get<1>(it).getType(), replacement);
         }
 
-        rewriter.updateRootInPlace(
+        rewriter.modifyOpInPlace(
             forOp, [&] { std::get<2>(it).replaceAllUsesWith(replacement); });
         canonicalize = true;
       }
@@ -444,7 +444,7 @@ struct RemoveUnusedArgs : public OpRewritePattern<ForOp> {
         newForOp.getBody()->getOperations().begin(),
         op.getBody()->getOperations());
 
-    rewriter.updateRootInPlace(op, [&] {
+    rewriter.modifyOpInPlace(op, [&] {
       op.getInductionVar().replaceAllUsesWith(newForOp.getInductionVar());
       for (auto pair : llvm::zip(usedBlockArgs, newForOp.getRegionIterArgs())) {
         std::get<0>(pair).replaceAllUsesWith(std::get<1>(pair));
@@ -486,7 +486,7 @@ struct ReplaceRedundantArgs : public OpRewritePattern<ForOp> {
                 op.getOperand(op.getNumControlOperands() + j) &&
             yieldOp.getOperand(i) == yieldOp.getOperand(j)) {
 
-          rewriter.updateRootInPlace(op, [&] {
+          rewriter.modifyOpInPlace(op, [&] {
             op.getResult(i).replaceAllUsesWith(op.getResult(j));
             blockArg.replaceAllUsesWith(op.getRegionIterArgs()[j]);
           });
@@ -532,7 +532,7 @@ cast<scf::YieldOp>(op.thenRegion().back().getTerminator());
 +            for (OpOperand &use :
 +                 llvm::make_early_inc_range(std::get<2>(tup).getUses())) {
 +              changed = true;
-+              rewriter.updateRootInPlace(use.getOwner(), [&]() {
++              rewriter.modifyOpInPlace(use.getOwner(), [&]() {
 +                use.set(rewriter.create<XOrOp>(op.getLoc(), op.condition()));
 +              });
 +            }
@@ -542,7 +542,7 @@ cast<scf::YieldOp>(op.thenRegion().back().getTerminator());
 +            for (OpOperand &use :
 +                 llvm::make_early_inc_range(std::get<2>(tup).getUses())) {
 +              changed = true;
-+              rewriter.updateRootInPlace(use.getOwner(),
++              rewriter.modifyOpInPlace(use.getOwner(),
 +                                         [&]() { use.set(op.condition()); });
 +            }
 +          }
@@ -861,7 +861,8 @@ struct WhileToForHelper {
     Value one;
     if (lb_addOne) {
       Value one =
-          rewriter.create<ConstantIntOp>(loop.getLoc(), 1, lb.getType());
+          rewriter.create<ConstantIntOp>(loop.getLoc(), 1,
+                                         cast<IntegerType>(lb.getType()).getWidth());
       lb = rewriter.create<AddIOp>(loop.getLoc(), lb, one);
     }
     if (ub_cloneMove) {
@@ -873,7 +874,8 @@ struct WhileToForHelper {
     }
     if (ub_addOne) {
       Value one =
-          rewriter.create<ConstantIntOp>(loop.getLoc(), 1, ub.getType());
+          rewriter.create<ConstantIntOp>(loop.getLoc(), 1,
+                                         cast<IntegerType>(ub.getType()).getWidth());
       ub = rewriter.create<AddIOp>(loop.getLoc(), ub, one);
     }
 
@@ -944,7 +946,7 @@ struct MoveWhileToFor : public OpRewritePattern<WhileOp> {
 
     auto oldYield = cast<scf::YieldOp>(loop.getAfter().front().getTerminator());
 
-    rewriter.updateRootInPlace(loop, [&] {
+    rewriter.modifyOpInPlace(loop, [&] {
       for (auto pair :
            llvm::zip(loop.getAfter().getArguments(), condOp.getArgs())) {
         std::get<0>(pair).replaceAllUsesWith(std::get<1>(pair));
@@ -966,7 +968,7 @@ struct MoveWhileToFor : public OpRewritePattern<WhileOp> {
 
     size_t pos = loop.getInits().size();
 
-    rewriter.updateRootInPlace(loop, [&] {
+    rewriter.modifyOpInPlace(loop, [&] {
       for (auto pair : llvm::zip(loop.getBefore().getArguments(),
                                  forloop.getRegionIterArgs().drop_back(pos))) {
         std::get<0>(pair).replaceAllUsesWith(std::get<1>(pair));
@@ -1046,9 +1048,11 @@ struct MoveWhileAndDown : public OpRewritePattern<WhileOp> {
 
       SmallVector<Value, 2> nextInits(unrollYield.begin(), unrollYield.end());
       Value falsev =
-          rewriter.create<ConstantIntOp>(loop.getLoc(), 0, extraCmp.getType());
+          rewriter.create<ConstantIntOp>(loop.getLoc(), 0,
+                                         cast<IntegerType>(extraCmp.getType()).getWidth());
       Value truev =
-          rewriter.create<ConstantIntOp>(loop.getLoc(), 1, extraCmp.getType());
+          rewriter.create<ConstantIntOp>(loop.getLoc(), 1,
+                                         cast<IntegerType>(extraCmp.getType()).getWidth());
       nextInits.push_back(truev);
       nextInits.push_back(loop.getInits()[helper.indVar.getArgNumber()]);
 
@@ -1185,14 +1189,14 @@ struct MoveWhileDown : public OpRewritePattern<WhileOp> {
       op.getAfter().front().getOperations().splice(
           op.getAfter().front().begin(),
           ifOp.getThenRegion().front().getOperations());
-      rewriter.updateRootInPlace(term, [&] {
+      rewriter.modifyOpInPlace(term, [&] {
         term.getConditionMutable().assign(ifOp.getCondition());
       });
       SmallVector<Value, 2> args;
       for (size_t i = 1; i < yield2.getNumOperands(); ++i) {
         args.push_back(yield2.getOperand(i));
       }
-      rewriter.updateRootInPlace(term,
+      rewriter.modifyOpInPlace(term,
                                  [&] { term.getArgsMutable().assign(args); });
       rewriter.eraseOp(yield2);
       rewriter.eraseOp(ifOp);
@@ -1211,7 +1215,7 @@ struct MoveWhileDown : public OpRewritePattern<WhileOp> {
         }
       }
 
-      rewriter.updateRootInPlace(op, [&] {
+      rewriter.modifyOpInPlace(op, [&] {
         for (auto val : todo) {
           auto na =
               op.getAfter().front().addArgument(val.getType(), op->getLoc());
@@ -1222,7 +1226,7 @@ struct MoveWhileDown : public OpRewritePattern<WhileOp> {
         }
       });
 
-      rewriter.updateRootInPlace(term,
+      rewriter.modifyOpInPlace(term,
                                  [&] { term.getArgsMutable().assign(args); });
 
       SmallVector<Type, 4> tys;
@@ -1383,7 +1387,7 @@ struct MoveWhileDown2 : public OpRewritePattern<WhileOp> {
         yieldArgs[pair.first] = pair.second;
       }
 
-      rewriter.updateRootInPlace(afterYield, [&] {
+      rewriter.modifyOpInPlace(afterYield, [&] {
         afterYield.getResultsMutable().assign(yieldArgs);
       });
       Block *afterB = &op.getAfter().front();
@@ -1398,7 +1402,7 @@ struct MoveWhileDown2 : public OpRewritePattern<WhileOp> {
           for (OpOperand &use : llvm::make_early_inc_range(v.getUses())) {
             if (ifOp->isAncestor(use.getOwner()) ||
                 use.getOwner() == afterYield)
-              rewriter.updateRootInPlace(use.getOwner(),
+              rewriter.modifyOpInPlace(use.getOwner(),
                                          [&]() { use.set(arg); });
           }
         }
@@ -1434,7 +1438,7 @@ struct MoveWhileDown2 : public OpRewritePattern<WhileOp> {
       nop.getBefore().takeBody(op.getBefore());
       nop.getAfter().takeBody(op.getAfter());
 
-      rewriter.updateRootInPlace(op, [&] {
+      rewriter.modifyOpInPlace(op, [&] {
         for (auto pair : llvm::enumerate(prevResults)) {
           pair.value().replaceAllUsesWith(nop.getResult(pair.index()));
         }
@@ -1468,7 +1472,7 @@ struct MoveWhileInvariantIfResult : public OpRewritePattern<WhileOp> {
             auto idx = cast<OpResult>(std::get<1>(pair)).getResultNumber();
             Value returnWith = ifOp.elseYield().getResults()[idx];
             if (!op.getBefore().isAncestor(returnWith.getParentRegion())) {
-              rewriter.updateRootInPlace(op, [&] {
+              rewriter.modifyOpInPlace(op, [&] {
                 std::get<0>(pair).replaceAllUsesWith(returnWith);
               });
               changed = true;
@@ -1479,7 +1483,7 @@ struct MoveWhileInvariantIfResult : public OpRewritePattern<WhileOp> {
           if (selOp.getCondition() == term.getCondition()) {
             Value returnWith = selOp.getFalseValue();
             if (!op.getBefore().isAncestor(returnWith.getParentRegion())) {
-              rewriter.updateRootInPlace(op, [&] {
+              rewriter.modifyOpInPlace(op, [&] {
                 std::get<0>(pair).replaceAllUsesWith(returnWith);
               });
               changed = true;
@@ -1543,7 +1547,7 @@ struct WhileLogicalNegation : public OpRewritePattern<WhileOp> {
       }
 
       if (!std::get<0>(pair).use_empty()) {
-        rewriter.updateRootInPlace(op, [&] {
+        rewriter.modifyOpInPlace(op, [&] {
           rewriter.setInsertionPoint(op);
           auto truev =
               rewriter.create<ConstantIntOp>(op.getLoc(), !afterValue, 1);
@@ -1552,7 +1556,7 @@ struct WhileLogicalNegation : public OpRewritePattern<WhileOp> {
         changed = true;
       }
       if (!std::get<2>(pair).use_empty()) {
-        rewriter.updateRootInPlace(op, [&] {
+        rewriter.modifyOpInPlace(op, [&] {
           rewriter.setInsertionPointToStart(&op.getAfter().front());
           auto truev =
               rewriter.create<ConstantIntOp>(op.getLoc(), afterValue, 1);
@@ -1595,7 +1599,7 @@ struct WhileCmpOffset : public OpRewritePattern<WhileOp> {
                     addI.getLoc(), oldInits[blockArg.getArgNumber()],
                     addI.getOperand(1));
                 op.getInitsMutable().assign(oldInits);
-                rewriter.updateRootInPlace(
+                rewriter.modifyOpInPlace(
                     addI, [&] { addI.replaceAllUsesWith(blockArg); });
               }
 
@@ -1605,7 +1609,7 @@ struct WhileCmpOffset : public OpRewritePattern<WhileOp> {
               oldYields[blockArg.getArgNumber()] = rewriter.create<AddIOp>(
                   addI.getLoc(), oldYields[blockArg.getArgNumber()],
                   addI.getOperand(1));
-              rewriter.updateRootInPlace(afterYield, [&] {
+              rewriter.modifyOpInPlace(afterYield, [&] {
                 afterYield.getResultsMutable().assign(oldYields);
               });
 
@@ -1613,7 +1617,7 @@ struct WhileCmpOffset : public OpRewritePattern<WhileOp> {
               auto sub = rewriter.create<SubIOp>(addI.getLoc(), blockArg,
                                                  addI.getOperand(1));
               for (OpOperand &use : rng) {
-                rewriter.updateRootInPlace(use.getOwner(),
+                rewriter.modifyOpInPlace(use.getOwner(),
                                            [&]() { use.set(sub); });
               }
               rewriter.eraseOp(addI);
@@ -1724,7 +1728,7 @@ struct MoveWhileDown3 : public OpRewritePattern<WhileOp> {
             } else {
               cloned->moveBefore(&op.getAfter().front().front());
             }
-            rewriter.updateRootInPlace(std::get<1>(pair).getDefiningOp(), [&] {
+            rewriter.modifyOpInPlace(std::get<1>(pair).getDefiningOp(), [&] {
               std::get<2>(pair).replaceAllUsesWith(cloned->getResult(0));
             });
             toErase.push_back(std::get<2>(pair).getArgNumber());
@@ -1751,7 +1755,7 @@ struct MoveWhileDown3 : public OpRewritePattern<WhileOp> {
     BitVector toEraseVec(op.getAfter().front().getNumArguments());
     for (auto argNum : toErase)
       toEraseVec[argNum] = true;
-    rewriter.updateRootInPlace(
+    rewriter.modifyOpInPlace(
         term, [&] { op.getAfter().front().eraseArguments(toEraseVec); });
     rewriter.setInsertionPoint(term);
     rewriter.replaceOpWithNewOp<ConditionOp>(term, term.getCondition(),
@@ -1768,7 +1772,7 @@ struct MoveWhileDown3 : public OpRewritePattern<WhileOp> {
     nop.getBefore().takeBody(op.getBefore());
     nop.getAfter().takeBody(op.getAfter());
 
-    rewriter.updateRootInPlace(op, [&] {
+    rewriter.modifyOpInPlace(op, [&] {
       for (auto pair : llvm::enumerate(returns)) {
         pair.value().replaceAllUsesWith(nop.getResult(pair.index()));
       }
@@ -1897,7 +1901,7 @@ struct WhileLICM : public OpRewritePattern<WhileOp> {
     }
 
     for (auto *moveOp : opsToMove)
-      rewriter.updateRootInPlace(moveOp, [&] { moveOp->moveBefore(op); });
+      rewriter.modifyOpInPlace(moveOp, [&] { moveOp->moveBefore(op); });
 
     return success(opsToMove.size() > 0);
   }
@@ -2026,7 +2030,7 @@ struct SubToAdd : public OpRewritePattern<SubIOp> {
       rewriter.replaceOpWithNewOp<AddIOp>(
           op, op.getOperand(0),
           rewriter.create<ConstantIntOp>(cop.getLoc(), -cop.value(),
-                                         cop.getType()));
+                                         cast<IntegerType>(cop.getType()).getWidth()));
       return success();
     }
     return failure();
@@ -2067,7 +2071,7 @@ struct RemoveUnusedResults : public OpRewritePattern<IfOp> {
                     [&](OpResult result) {
                       return yieldOp.getOperand(result.getResultNumber());
                     });
-    rewriter.updateRootInPlace(yieldOp,
+    rewriter.modifyOpInPlace(yieldOp,
                                [&]() { yieldOp->setOperands(usedOperands); });
   }
 
@@ -2247,7 +2251,7 @@ void CanonicalizeFor::runOnOperation() {
           RemoveUnusedCondVar, ReturnSq, MoveSideEffectFreeWhile>(
       getOperation()->getContext());
   GreedyRewriteConfig config;
-  config.maxIterations = 247;
+  config.setMaxIterations(247);
   (void)applyPatternsGreedily(getOperation(), std::move(rpl), config);
 }
 

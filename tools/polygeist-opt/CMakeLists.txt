@@ -7,6 +7,7 @@ set(LIBS
         MLIRPolygeist
         MLIRPolygeistTransforms
         MLIRFuncAllExtensions
+        MLIRRegisterAllPasses
 )
 if(POLYGEIST_ENABLE_POLYMER)
         list(APPEND LIBS

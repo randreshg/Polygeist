@@ -59,7 +59,7 @@ def CacheLoad
   let results = (outs AnyType:$result);
   let builders = [
     OpBuilder<(ins "Value":$memref, CArg<"ValueRange", "{}">:$indices), [{
-      auto memrefType = memref.getType().cast<MemRefType>();
+      auto memrefType = cast<MemRefType>(memref.getType());
       $_state.addOperands(memref);
       $_state.addOperands(indices);
       $_state.types.push_back(memrefType.getElementType());
@@ -101,7 +101,7 @@ def DynLoadOp : Polygeist_Op<"load", [AttrSizedOperandSegments]> {
 
   let extraClassDeclaration = [{
     MemRefType getMemrefType() { 
-      return getMemref().getType().cast<MemRefType>(); 
+      return cast<MemRefType>(getMemref().getType()); 
     }
   }];
 }
@@ -124,7 +124,7 @@ def DynStoreOp : Polygeist_Op<"store", [AttrSizedOperandSegments]> {
 
   let extraClassDeclaration = [{
     MemRefType getMemrefType() { 
-      return getMemref().getType().cast<MemRefType>(); 
+      return cast<MemRefType>(getMemref().getType()); 
     }
   }];
 }

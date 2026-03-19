@@ -21,6 +21,7 @@
 #include <clang/Frontend/TextDiagnosticBuffer.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/Frontend/Utils.h>
+#include <clang/Options/Options.h>
 
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/GPUCommon/GPUCommonPass.h"
@@ -31,7 +32,7 @@
 #include "mlir/Conversion/OpenMPToLLVM/ConvertOpenMPToLLVM.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Conversion/SCFToOpenMP/SCFToOpenMP.h"
-#include "mlir/Dialect/Affine/Passes.h"
+#include "mlir/Dialect/Affine/Transforms/Passes.h"
 #include "mlir/Dialect/Async/IR/Async.h"
 #include "mlir/Dialect/DLTI/DLTI.h"
 #include "mlir/Dialect/Func/Extensions/InlinerExtension.h"
@@ -275,14 +276,14 @@ public:
   template <typename... OptSpecifiers> bool hasArg(OptSpecifiers... Ids) const {
     std::vector _Ids({Ids...});
     for (auto &Id : _Ids) {
-      if (Id == clang::driver::options::OPT_nogpulib) {
+      if (Id == clang::options::OPT_no_offloadlib) {
         continue;
-      } else if (Id == clang::driver::options::OPT_cuda_path_EQ) {
+      } else if (Id == clang::options::OPT_cuda_path_EQ) {
         if (CUDAPath == "")
           continue;
         else
           return true;
-      } else if (Id == clang::driver::options::OPT_cuda_path_ignore_env) {
+      } else if (Id == clang::options::OPT_cuda_path_ignore_env) {
         continue;
       } else {
         continue;
@@ -292,7 +293,7 @@ public:
   }
   StringRef getLastArgValue(llvm::opt::OptSpecifier Id,
                             StringRef Default = "") const {
-    if (Id == clang::driver::options::OPT_cuda_path_EQ) {
+    if (Id == clang::options::OPT_cuda_path_EQ) {
       return CUDAPath;
     }
     return Default;
@@ -351,12 +352,12 @@ static int ExecuteCC1Tool(SmallVectorImpl<const char *> &ArgV,
   StringRef Tool = ArgV[1];
   void *GetExecutablePathVP = (void *)(intptr_t)GetExecutablePath;
   if (Tool == "-cc1")
-    return cc1_main(makeArrayRef(ArgV).slice(1), ArgV[0], GetExecutablePathVP);
+    return cc1_main(ArrayRef(ArgV).slice(1), ArgV[0], GetExecutablePathVP);
   if (Tool == "-cc1as")
-    return cc1as_main(makeArrayRef(ArgV).slice(2), ArgV[0],
+    return cc1as_main(ArrayRef(ArgV).slice(2), ArgV[0],
                       GetExecutablePathVP);
   if (Tool == "-cc1gen-reproducer")
-    return cc1gen_reproducer_main(makeArrayRef(ArgV).slice(2), ArgV[0],
+    return cc1gen_reproducer_main(ArrayRef(ArgV).slice(2), ArgV[0],
                                   GetExecutablePathVP, ToolContext);
   // Reject unknown tools.
   llvm::errs() << "error: unknown integrated tool '" << Tool << "'. "
@@ -373,11 +374,11 @@ int emitBinary(char *Argv0, const char *filename,
   IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
   // Buffer diagnostics from argument parsing so that we can output them using a
   // well formed diagnostic object.
-  IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
+  DiagnosticOptions DiagOpts;
   TextDiagnosticPrinter *DiagBuffer =
-      new TextDiagnosticPrinter(llvm::errs(), &*DiagOpts);
+      new TextDiagnosticPrinter(llvm::errs(), DiagOpts);
 
-  DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagBuffer);
+  DiagnosticsEngine Diags(DiagID, DiagOpts, DiagBuffer);
 
   string TargetTriple;
   if (TargetTripleOpt == "")
@@ -456,7 +457,7 @@ int emitBinary(char *Argv0, const char *filename,
       break;
     }
   }
-  Diags.getClient()->finish();
+  Diags.getClient()->EndSourceFile();
 
   return Res;
 }
@@ -481,23 +482,23 @@ int main(int argc, char **argv) {
       if (ref == "-Wl,--start-group")
         linkOnly = true;
       if (!linkOnly) {
-        if (ref == "-fPIC" || ref == "-c" || ref.startswith("-fsanitize")) {
+        if (ref == "-fPIC" || ref == "-c" || ref.starts_with("-fsanitize")) {
           LinkageArgs.push_back(argv[i]);
         } else if (ref == "-L" || ref == "-l") {
           LinkageArgs.push_back(argv[i]);
           i++;
           LinkageArgs.push_back(argv[i]);
-        } else if (ref.startswith("-L") || ref.startswith("-l") ||
-                   ref.startswith("-Wl")) {
+        } else if (ref.starts_with("-L") || ref.starts_with("-l") ||
+                   ref.starts_with("-Wl")) {
           LinkageArgs.push_back(argv[i]);
         } else if (ref == "-D" || ref == "-I") {
           MLIRArgs.push_back(argv[i]);
           i++;
           MLIRArgs.push_back(argv[i]);
-        } else if (ref.startswith("-D")) {
+        } else if (ref.starts_with("-D")) {
           MLIRArgs.push_back("-D");
           MLIRArgs.push_back(&argv[i][2]);
-        } else if (ref.startswith("-I")) {
+        } else if (ref.starts_with("-I")) {
           MLIRArgs.push_back("-I");
           MLIRArgs.push_back(&argv[i][2]);
         } else if (ref == "-g") {
@@ -658,7 +659,7 @@ int main(int argc, char **argv) {
 
   mlir::OpPassManager &optPM = pm.nest<mlir::func::FuncOp>();
   GreedyRewriteConfig canonicalizerConfig;
-  canonicalizerConfig.maxIterations = CanonicalizeIterations;
+  canonicalizerConfig.setMaxIterations(CanonicalizeIterations);
   if (true) {
     optPM.addPass(mlir::createCSEPass());
     optPM.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
@@ -787,7 +788,7 @@ int main(int argc, char **argv) {
             canonicalizerConfig, {}, {}));
         if (LoopUnroll)
           noptPM2.addPass(
-              mlir::affine::createLoopUnrollPass(unrollSize, false, true));
+              mlir::affine::createLoopUnrollPass(unrollSize, false));
         noptPM2.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
             canonicalizerConfig, {}, {}));
         noptPM2.addPass(mlir::createCSEPass());
@@ -866,7 +867,7 @@ int main(int argc, char **argv) {
             canonicalizerConfig, {}, {}));
         if (LoopUnroll)
           optPM.addPass(
-              mlir::affine::createLoopUnrollPass(unrollSize, false, true));
+              mlir::affine::createLoopUnrollPass(unrollSize, false));
         optPM.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
             canonicalizerConfig, {}, {}));
         optPM.addPass(mlir::createCSEPass());
@@ -1019,11 +1020,10 @@ int main(int argc, char **argv) {
           using namespace clang::driver;
           using namespace std;
           IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
-          IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts =
-              new DiagnosticOptions();
+          DiagnosticOptions DiagOpts;
           TextDiagnosticPrinter *DiagBuffer =
-              new TextDiagnosticPrinter(llvm::errs(), &*DiagOpts);
-          DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagBuffer);
+              new TextDiagnosticPrinter(llvm::errs(), DiagOpts);
+          DiagnosticsEngine Diags(DiagID, DiagOpts, DiagBuffer);
           const unique_ptr<Driver> driver(
               new Driver("clang", triple.str(), Diags));
           PolygeistCudaDetectorArgList argList;
@@ -1201,7 +1201,7 @@ int main(int argc, char **argv) {
       }
     }
     llvmModule->setDataLayout(DL);
-    llvmModule->setTargetTriple(triple.getTriple());
+    llvmModule->setTargetTriple(triple);
     if (!EmitAssembly) {
       auto tmpFile =
           llvm::sys::fs::TempFile::create("/tmp/intermediate%%%%%%%.ll");

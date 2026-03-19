@@ -157,7 +157,8 @@ private:
   mlir::Block *allocationScope;
 
   std::map<const void *, std::vector<mlir::LLVM::AllocaOp>> bufs;
-  mlir::LLVM::AllocaOp allocateBuffer(size_t i, mlir::LLVM::LLVMPointerType t) {
+  mlir::LLVM::AllocaOp allocateBuffer(size_t i, mlir::LLVM::LLVMPointerType t,
+                                      mlir::Type elemType) {
     auto &vec = bufs[t.getAsOpaquePointer()];
     if (i < vec.size())
       return vec[i];
@@ -167,7 +168,7 @@ private:
     auto loc = subbuilder.getUnknownLoc();
 
     auto one = subbuilder.create<arith::ConstantIntOp>(loc, 1, 64);
-    auto rs = subbuilder.create<mlir::LLVM::AllocaOp>(loc, t, one, 0);
+    auto rs = subbuilder.create<mlir::LLVM::AllocaOp>(loc, t, elemType, one, 0);
     vec.push_back(rs);
     return rs;
   }
@@ -245,7 +246,8 @@ public:
                                    mlir::Value imag, clang::QualType cty);
   mlir::Value getComplexPart(mlir::Location loc, mlir::Value complex, int fnum);
   ValueCategory getComplexPartRef(mlir::Location loc, mlir::Value complex,
-                                  int fnum);
+                                  int fnum,
+                                  mlir::Type *pointeeType = nullptr);
 
   ValueCategory VisitDeclStmt(clang::DeclStmt *decl);
 

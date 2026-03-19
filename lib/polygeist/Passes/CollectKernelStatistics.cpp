@@ -13,7 +13,7 @@
 #include "mlir/IR/Value.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Pass/PassManager.h"
-#include "mlir/Support/MathExtras.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 
@@ -40,8 +40,8 @@ static double estimateTripCount(Block *block, unsigned threadNum) {
           forOp.getUpperBound().getDefiningOp<arith::ConstantIndexOp>();
       auto stepCstOp = forOp.getStep().getDefiningOp<arith::ConstantIndexOp>();
       if (lbCstOp && ubCstOp && stepCstOp)
-        return mlir::ceilDiv(ubCstOp.value() - lbCstOp.value(),
-                             stepCstOp.value());
+        return llvm::divideCeil(ubCstOp.value() - lbCstOp.value(),
+                               stepCstOp.value());
       else
         return 1.0;
     } else if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
@@ -207,7 +207,7 @@ std::array<StrideTy, 3> estimateStride(mlir::OperandRange indices,
         return 0;
       } else if (auto forOp =
                      dyn_cast<scf::ForOp>(ba.getOwner()->getParentOp())) {
-        return getTidXCoef(forOp.getOpOperandForRegionIterArg(ba).get(),
+        return getTidXCoef(forOp.getTiedLoopInit(ba)->get(),
                            isTidI);
       } else {
         return UNKNOWN;
