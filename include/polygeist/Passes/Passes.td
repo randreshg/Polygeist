@@ -127,11 +127,6 @@ def ConvertParallelToGPU2 : Pass<"convert-parallel-to-gpu2"> {
   let dependentDialects = ["func::FuncDialect", "LLVM::LLVMDialect", "memref::MemRefDialect", "gpu::GPUDialect"];
 }
 
-def ConvertToOpaquePtrPass : Pass<"convert-to-opaque-ptr"> {
-  let summary = "Convert typed llvm pointers to opaque";
-  let constructor = "mlir::polygeist::createConvertToOpaquePtrPass()";
-  let dependentDialects = ["LLVM::LLVMDialect"];
-}
 
 def MergeGPUModulesPass : Pass<"merge-gpu-modules", "mlir::ModuleOp"> {
   let summary = "Merge all gpu modules into one";

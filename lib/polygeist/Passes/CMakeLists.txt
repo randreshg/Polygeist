@@ -1,5 +1,4 @@
 add_mlir_dialect_library(MLIRPolygeistTransforms
-  ConvertToOpaquePtr.cpp
   AffineCFG.cpp
   PolyhedralOpt.cpp
   AffineReduction.cpp

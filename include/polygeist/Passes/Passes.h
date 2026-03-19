@@ -60,7 +60,6 @@ createConvertParallelToGPUPass1(std::string arch = "sm_60");
 std::unique_ptr<Pass>
 createConvertParallelToGPUPass2(bool emitGPUKernelLaunchBounds = true);
 std::unique_ptr<Pass> createMergeGPUModulesPass();
-std::unique_ptr<Pass> createConvertToOpaquePtrPass();
 std::unique_ptr<Pass> createLowerAlternativesPass();
 std::unique_ptr<Pass> createCollectKernelStatisticsPass();
 std::unique_ptr<Pass> createPolygeistCanonicalizePass();
