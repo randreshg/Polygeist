@@ -9,7 +9,11 @@
 // This file implements a pass to lower gpu kernels in NVVM/gpu dialects into
 // a generic parallel for representation
 //===----------------------------------------------------------------------===//
-#include "PassDetails.h"
+#define GEN_PASS_DEF_CONVERTPOLYGEISTTOLLVM
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/../../lib/Conversion/MemRefToLLVM/MemRefToLLVM.cpp"
 #include "mlir/Analysis/DataLayoutAnalysis.h"
@@ -3072,7 +3076,7 @@ populateCStyleFuncLoweringPatterns(RewritePatternSet &patterns,
 namespace {
 
 struct ConvertPolygeistToLLVMPass
-    : public ConvertPolygeistToLLVMBase<ConvertPolygeistToLLVMPass> {
+    : public impl::ConvertPolygeistToLLVMBase<ConvertPolygeistToLLVMPass> {
   bool onlyGpuModules;
   std::string gpuTarget;
   ConvertPolygeistToLLVMPass() = default;

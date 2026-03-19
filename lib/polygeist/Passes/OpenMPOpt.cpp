@@ -1,4 +1,8 @@
-#include "PassDetails.h"
+#define GEN_PASS_DEF_OPENMPOPTPASS
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -19,7 +23,7 @@ using namespace mlir::arith;
 using namespace polygeist;
 
 namespace {
-struct OpenMPOpt : public OpenMPOptPassBase<OpenMPOpt> {
+struct OpenMPOpt : public impl::OpenMPOptPassBase<OpenMPOpt> {
   void runOnOperation() override;
 };
 } // namespace

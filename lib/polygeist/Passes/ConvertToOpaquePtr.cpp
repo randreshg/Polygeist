@@ -1,4 +1,8 @@
-#include "PassDetails.h"
+#define GEN_PASS_DEF_CONVERTTOOPAQUEPTRPASS
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -205,7 +209,7 @@ struct GEPConversion : public OpConversionPattern<LLVM::GEPOp> {
 };
 
 struct ConvertToOpaquePtrPass
-    : public ConvertToOpaquePtrPassBase<ConvertToOpaquePtrPass> {
+    : public impl::ConvertToOpaquePtrPassBase<ConvertToOpaquePtrPass> {
   void runOnOperation() override {
     getOperation()->walk([&](Operation *op) {
       if (!isa<ModuleOp>(op))

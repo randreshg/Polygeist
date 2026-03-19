@@ -1,4 +1,8 @@
-#include "PassDetails.h"
+#define GEN_PASS_DEF_COLLECTKERNELSTATISTICS
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -432,7 +436,7 @@ static void generateAlternativeKernelDescs(mlir::ModuleOp m) {
 } // namespace
 
 struct CollectKernelStatisticsPass
-    : public CollectKernelStatisticsBase<CollectKernelStatisticsPass> {
+    : public impl::CollectKernelStatisticsBase<CollectKernelStatisticsPass> {
   void runOnOperation() override {
     generateAlternativeKernelDescs(getOperation());
   }

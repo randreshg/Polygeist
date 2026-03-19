@@ -5,7 +5,13 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-#include "PassDetails.h"
+#define GEN_PASS_DEF_CONVERTPARALLELTOGPU1
+#define GEN_PASS_DEF_CONVERTPARALLELTOGPU2
+#define GEN_PASS_DEF_MERGEGPUMODULESPASS
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -1678,7 +1684,7 @@ uint64_t getSharedMemUsage(scf::ParallelOp pop) {
 
 // TODO parallel wrapper LICM
 struct ConvertParallelToGPU1Pass
-    : public ConvertParallelToGPU1Base<ConvertParallelToGPU1Pass> {
+    : public impl::ConvertParallelToGPU1Base<ConvertParallelToGPU1Pass> {
   ConvertParallelToGPU1Pass(std::string arch) { this->arch.setValue(arch); }
   void runOnOperation() override {
     auto m = getOperation();
@@ -2187,7 +2193,7 @@ struct ConvertParallelToGPU1Pass
 };
 
 struct ConvertParallelToGPU2Pass
-    : public ConvertParallelToGPU2Base<ConvertParallelToGPU2Pass> {
+    : public impl::ConvertParallelToGPU2Base<ConvertParallelToGPU2Pass> {
   bool emitGPUKernelLaunchBounds;
   ConvertParallelToGPU2Pass(bool emitGPUKernelLaunchBounds)
       : emitGPUKernelLaunchBounds(emitGPUKernelLaunchBounds) {}
@@ -2221,7 +2227,7 @@ struct ConvertParallelToGPU2Pass
 };
 
 struct MergeGPUModulesPass
-    : public MergeGPUModulesPassBase<MergeGPUModulesPass> {
+    : public impl::MergeGPUModulesPassBase<MergeGPUModulesPass> {
   void runOnOperation() override {
     auto m = getOperation();
     Region &moduleRegion = m->getRegion(0);

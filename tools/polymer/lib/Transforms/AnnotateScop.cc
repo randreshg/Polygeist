@@ -1,6 +1,9 @@
 //===- AnnotateScop.cc --------------------------------------*- C++ -*-===//
 
-#include "PassDetail.h"
+#define GEN_PASS_DEF_ANNOTATESCOP
+#include "mlir/Pass/Pass.h"
+#include "polymer/Transforms/Passes.h"
+#include "polymer/Transforms/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/LoopUtils.h"
@@ -15,7 +18,7 @@ using namespace llvm;
 using namespace polymer;
 
 namespace {
-struct AnnotateScop : public polymer::AnnotateScopBase<AnnotateScop> {
+struct AnnotateScop : public polymer::impl::AnnotateScopBase<AnnotateScop> {
   void runOnOperation() override {
     func::FuncOp f = getOperation();
     OpBuilder b(f.getContext());

@@ -1,4 +1,8 @@
-#include "PassDetails.h"
+#define GEN_PASS_DEF_LOWERALTERNATIVES
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/Passes.h"
@@ -110,7 +114,7 @@ struct LowerGPUAlternativesOp
 } // namespace
 
 struct LowerAlternativesPass
-    : public LowerAlternativesBase<LowerAlternativesPass> {
+    : public impl::LowerAlternativesBase<LowerAlternativesPass> {
   void runOnOperation() override {
     if (char *e = getenv("POLYGEIST_CHOOSE_ALTERNATIVE")) {
       int id = atoi(e);

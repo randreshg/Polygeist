@@ -10,7 +10,15 @@
 // a generic parallel for representation
 //===----------------------------------------------------------------------===//
 
-#include "PassDetails.h"
+#define GEN_PASS_DEF_CONVERTCUDARTTOCPU
+#define GEN_PASS_DEF_CONVERTCUDARTTOGPU
+#define GEN_PASS_DEF_CONVERTCUDARTTOHIPRT
+#define GEN_PASS_DEF_FIXGPUFUNC
+#define GEN_PASS_DEF_PARALLELLOWER
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 #include "mlir/Analysis/CallGraph.h"
 #include "mlir/Analysis/DataLayoutAnalysis.h"
 #include "mlir/Dialect/Affine/Analysis/AffineAnalysis.h"
@@ -82,7 +90,7 @@ namespace {
 //
 // TODO do not take wrap argument, instead, always wrap and if we will be
 // lowering to cpu, remove them before continuing
-struct ParallelLower : public ParallelLowerBase<ParallelLower> {
+struct ParallelLower : public impl::ParallelLowerBase<ParallelLower> {
   ParallelLower(bool wrapParallelOps,
                 PolygeistGPUStructureMode gpuKernelStructureMode)
       : wrapParallelOps(wrapParallelOps),
@@ -91,17 +99,17 @@ struct ParallelLower : public ParallelLowerBase<ParallelLower> {
   bool wrapParallelOps;
   PolygeistGPUStructureMode gpuKernelStructureMode;
 };
-struct ConvertCudaRTtoCPU : public ConvertCudaRTtoCPUBase<ConvertCudaRTtoCPU> {
+struct ConvertCudaRTtoCPU : public impl::ConvertCudaRTtoCPUBase<ConvertCudaRTtoCPU> {
   void runOnOperation() override;
 };
-struct ConvertCudaRTtoGPU : public ConvertCudaRTtoGPUBase<ConvertCudaRTtoGPU> {
+struct ConvertCudaRTtoGPU : public impl::ConvertCudaRTtoGPUBase<ConvertCudaRTtoGPU> {
   void runOnOperation() override;
 };
 struct ConvertCudaRTtoHipRT
-    : public ConvertCudaRTtoHipRTBase<ConvertCudaRTtoHipRT> {
+    : public impl::ConvertCudaRTtoHipRTBase<ConvertCudaRTtoHipRT> {
   void runOnOperation() override;
 };
-struct FixGPUFunc : public FixGPUFuncBase<FixGPUFunc> {
+struct FixGPUFunc : public impl::FixGPUFuncBase<FixGPUFunc> {
   void runOnOperation() override;
 };
 

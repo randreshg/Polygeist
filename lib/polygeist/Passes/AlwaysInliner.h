@@ -1,7 +1,11 @@
 #ifndef _POLYGEIST_PASSES_ALWAYSINLINER_H_
 #define _POLYGEIST_PASSES_ALWAYSINLINER_H_
 
-#include "PassDetails.h"
+// No GEN_PASS_DEF needed — uses PassWrapper
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 #include "mlir/Analysis/CallGraph.h"
 #include "mlir/Analysis/DataLayoutAnalysis.h"
 #include "mlir/Dialect/Affine/Analysis/AffineAnalysis.h"

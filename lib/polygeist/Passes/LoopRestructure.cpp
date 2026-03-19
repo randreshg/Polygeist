@@ -7,7 +7,11 @@
 //===----------------------------------------------------------------------===//
 //
 //===----------------------------------------------------------------------===//
-#include "PassDetails.h"
+#define GEN_PASS_DEF_LOOPRESTRUCTURE
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -186,7 +190,7 @@ struct GraphTraits<const DomTreeNodeBase<Wrapper> *>
 
 namespace {
 
-struct LoopRestructure : public LoopRestructureBase<LoopRestructure> {
+struct LoopRestructure : public impl::LoopRestructureBase<LoopRestructure> {
   void runOnRegion(DominanceInfo &domInfo, Region &region);
   bool removeIfFromRegion(DominanceInfo &domInfo, Region &region,
                           Block *pseudoExit);

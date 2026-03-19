@@ -5,7 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-#include "PassDetails.h"
+#define GEN_PASS_DEF_SCFCPUIFY
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -2646,7 +2650,7 @@ struct LowerCacheLoad : public OpRewritePattern<polygeist::CacheLoad> {
   }
 };
 
-struct CPUifyPass : public SCFCPUifyBase<CPUifyPass> {
+struct CPUifyPass : public impl::SCFCPUifyBase<CPUifyPass> {
   template <bool UseMinCut>
   void addPatterns(RewritePatternSet &patterns, StringRef method) {
     patterns.insert<

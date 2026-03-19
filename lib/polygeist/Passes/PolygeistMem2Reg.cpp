@@ -12,7 +12,11 @@
 // dead memref store's and perform more complex forwarding when support for
 // SSA scalars live out of 'affine.for'/'affine.if' statements is available.
 //===----------------------------------------------------------------------===//
-#include "PassDetails.h"
+#define GEN_PASS_DEF_POLYGEISTMEM2REG
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 #include "mlir/Dialect/Affine/Analysis/AffineAnalysis.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -201,7 +205,7 @@ namespace {
 // currently only eliminates the stores only if no other loads/uses (other
 // than dealloc) remain.
 //
-struct PolygeistMem2Reg : public PolygeistMem2RegBase<PolygeistMem2Reg> {
+struct PolygeistMem2Reg : public impl::PolygeistMem2RegBase<PolygeistMem2Reg> {
   void runOnOperation() override;
 
   // return if changed

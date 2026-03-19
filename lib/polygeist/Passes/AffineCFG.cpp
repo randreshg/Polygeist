@@ -1,4 +1,8 @@
-#include "PassDetails.h"
+#define GEN_PASS_DEF_AFFINECFG
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/Passes.h"
@@ -718,7 +722,7 @@ void fully2ComposeIntegerSetAndOperands(PatternRewriter &builder,
 }
 
 namespace {
-struct AffineCFGPass : public AffineCFGBase<AffineCFGPass> {
+struct AffineCFGPass : public impl::AffineCFGBase<AffineCFGPass> {
   void runOnOperation() override;
 };
 } // namespace

@@ -5,7 +5,11 @@
 #include "mlir/Transforms/Passes.h"
 #include <utility>
 
-#include "PassDetails.h"
+#define GEN_PASS_DEF_POLYHEDRALOPT
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/Passes.h"
@@ -194,7 +198,7 @@ static void cleanupTempFuncs(ModuleOp m) {
   eraseWithAttr(SCOP_STMT_ATTR_NAME);
 }
 
-struct PolyhedralOptPass : public PolyhedralOptBase<PolyhedralOptPass> {
+struct PolyhedralOptPass : public impl::PolyhedralOptBase<PolyhedralOptPass> {
   PolyhedralOptPass(polymer::PlutoOptPipelineOptions *plutoOpts) {}
   void runOnOperation() override;
 };
@@ -275,7 +279,11 @@ std::unique_ptr<Pass> mlir::polygeist::createPolyhedralOptPass() {
 
 #else
 
-#include "PassDetails.h"
+#define GEN_PASS_DEF_POLYHEDRALOPT
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -287,7 +295,7 @@ class Pass;
 using namespace mlir;
 using namespace polygeist;
 namespace {
-struct PolyhedralOptPass : public PolyhedralOptBase<PolyhedralOptPass> {
+struct PolyhedralOptPass : public impl::PolyhedralOptBase<PolyhedralOptPass> {
   void runOnOperation() override {}
 };
 } // namespace

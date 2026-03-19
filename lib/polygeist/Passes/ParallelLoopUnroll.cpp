@@ -10,7 +10,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "PassDetails.h"
+#define GEN_PASS_DEF_SCFPARALLELLOOPUNROLL
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -422,7 +426,7 @@ LogicalResult mlir::polygeist::scfParallelUnrollByFactor(
 }
 
 struct SCFParallelLoopUnroll
-    : public SCFParallelLoopUnrollBase<SCFParallelLoopUnroll> {
+    : public impl::SCFParallelLoopUnrollBase<SCFParallelLoopUnroll> {
   SCFParallelLoopUnroll() = default;
   SCFParallelLoopUnroll(int unrollFactor) {
     this->unrollFactor.setValue(unrollFactor);

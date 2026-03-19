@@ -11,7 +11,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "PassDetails.h"
+#define GEN_PASS_DEF_SCFBARRIERREMOVALCONTINUATION
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -604,7 +608,7 @@ static void createContinuations(FunctionOpInterface func) {
 
 namespace {
 struct BarrierRemoval
-    : public SCFBarrierRemovalContinuationBase<BarrierRemoval> {
+    : public impl::SCFBarrierRemovalContinuationBase<BarrierRemoval> {
   void runOnOperation() override {
     auto f = getOperation();
     if (failed(convertToCFG(f)))

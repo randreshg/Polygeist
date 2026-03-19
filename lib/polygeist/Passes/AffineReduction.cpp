@@ -1,4 +1,8 @@
-#include "PassDetails.h"
+#define GEN_PASS_DEF_AFFINEREDUCTION
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/Passes.h"
@@ -13,7 +17,7 @@ using namespace polygeist;
 using namespace mlir::affine;
 
 namespace {
-struct AffineReductionPass : public AffineReductionBase<AffineReductionPass> {
+struct AffineReductionPass : public impl::AffineReductionBase<AffineReductionPass> {
   void runOnOperation() override;
 };
 } // end namespace.

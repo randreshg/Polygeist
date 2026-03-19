@@ -6,7 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "PassDetails.h"
+#define GEN_PASS_DEF_POLYGEISTCANONICALIZE
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/Passes.h"
 #include "mlir/Dialect/Async/IR/Async.h"
@@ -36,7 +40,7 @@ using namespace polygeist;
 
 namespace {
 struct PolygeistCanonicalizePass
-    : public PolygeistCanonicalizeBase<PolygeistCanonicalizePass> {
+    : public impl::PolygeistCanonicalizeBase<PolygeistCanonicalizePass> {
   PolygeistCanonicalizePass() = default;
   PolygeistCanonicalizePass(const GreedyRewriteConfig &config,
                             ArrayRef<std::string> disabledPatterns,

@@ -1,4 +1,8 @@
-#include "PassDetails.h"
+#define GEN_PASS_DEF_PARALLELLICM
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -23,7 +27,7 @@ using namespace mlir::arith;
 using namespace polygeist;
 
 namespace {
-struct ParallelLICM : public ParallelLICMBase<ParallelLICM> {
+struct ParallelLICM : public impl::ParallelLICMBase<ParallelLICM> {
   void runOnOperation() override;
 };
 } // namespace

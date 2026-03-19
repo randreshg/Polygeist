@@ -1,4 +1,8 @@
-#include "PassDetails.h"
+#define GEN_PASS_DEF_SCFRAISETOAFFINE
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -21,7 +25,7 @@ using namespace polygeist;
 using namespace affine;
 
 namespace {
-struct RaiseSCFToAffine : public SCFRaiseToAffineBase<RaiseSCFToAffine> {
+struct RaiseSCFToAffine : public impl::SCFRaiseToAffineBase<RaiseSCFToAffine> {
   void runOnOperation() override;
 };
 } // namespace

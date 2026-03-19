@@ -1,4 +1,8 @@
-#include "PassDetails.h"
+#define GEN_PASS_DEF_SCFCANONICALIZEFOR
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -18,7 +22,7 @@ using namespace mlir::arith;
 using namespace polygeist;
 
 namespace {
-struct CanonicalizeFor : public SCFCanonicalizeForBase<CanonicalizeFor> {
+struct CanonicalizeFor : public impl::SCFCanonicalizeForBase<CanonicalizeFor> {
   void runOnOperation() override;
 };
 } // namespace

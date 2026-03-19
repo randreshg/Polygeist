@@ -6,7 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "PassDetails.h"
+#define GEN_PASS_DEF_FORBREAKTOWHILE
+#include "mlir/Pass/Pass.h"
+#include "polygeist/Ops.h"
+#include "polygeist/Passes/Passes.h"
+#include "polygeist/Passes/Passes.h.inc"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -166,7 +170,7 @@ struct ForBreakLoweringPattern : public OpRewritePattern<ForOp> {
   }
 };
 
-struct ForBreakToWhileLoop : public ForBreakToWhileBase<ForBreakToWhileLoop> {
+struct ForBreakToWhileLoop : public impl::ForBreakToWhileBase<ForBreakToWhileLoop> {
   void runOnOperation() override {
     auto *parentOp = getOperation();
     MLIRContext *ctx = parentOp->getContext();
