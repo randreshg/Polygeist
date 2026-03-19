@@ -172,7 +172,7 @@ struct ForBreakToWhileLoop : public ForBreakToWhileBase<ForBreakToWhileLoop> {
     MLIRContext *ctx = parentOp->getContext();
     RewritePatternSet patterns(ctx);
     patterns.add<ForBreakLoweringPattern>(patterns.getContext(), /*benefit=*/3);
-    (void)applyPatternsAndFoldGreedily(parentOp, std::move(patterns));
+    (void)applyPatternsGreedily(parentOp, std::move(patterns));
   }
 };
 } // namespace

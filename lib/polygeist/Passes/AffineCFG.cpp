@@ -114,9 +114,9 @@ private:
 };
 
 static bool isAffineForArg(Value val) {
-  if (!val.isa<BlockArgument>())
+  if (!isa<BlockArgument>(val))
     return false;
-  Operation *parentOp = val.cast<BlockArgument>().getOwner()->getParentOp();
+  Operation *parentOp = cast<BlockArgument>(val).getOwner()->getParentOp();
   return (
       isa_and_nonnull<affine::AffineForOp, affine::AffineParallelOp>(parentOp));
 }
@@ -256,7 +256,7 @@ AffineApplyNormalizer::AffineApplyNormalizer(AffineMap map,
         }
         next = op->getNextNode();
       } else {
-        auto BA = o.cast<BlockArgument>();
+        auto BA = cast<BlockArgument>(o);
         if (index && isAffineForArg(BA)) {
         } else if (!isValidSymbolInt(o, /*recur*/ false)) {
           return nullptr;
@@ -576,8 +576,7 @@ AffineDimExpr AffineApplyNormalizer::renumberOneDim(Value v) {
   if (inserted) {
     reorderedDims.push_back(v);
   }
-  return getAffineDimExpr(iterPos->second, v.getContext())
-      .cast<AffineDimExpr>();
+  return cast<AffineDimExpr>(getAffineDimExpr(iterPos->second, v.getContext()));
 }
 
 static void composeAffineMapAndOperands(AffineMap *map,
@@ -647,7 +646,7 @@ void fully2ComposeAffineMapAndOperands(PatternRewriter &builder, AffineMap *map,
       if (auto *o = op.getDefiningOp())
         toInsert = o->getNextNode();
       else {
-        auto BA = op.cast<BlockArgument>();
+        auto BA = cast<BlockArgument>(op);
         toInsert = &BA.getOwner()->front();
       }
 
@@ -702,7 +701,7 @@ void fully2ComposeIntegerSetAndOperands(PatternRewriter &builder,
       if (auto *o = op.getDefiningOp())
         toInsert = o->getNextNode();
       else {
-        auto BA = op.cast<BlockArgument>();
+        auto BA = cast<BlockArgument>(op);
         toInsert = &BA.getOwner()->front();
       }
 
@@ -1094,13 +1093,13 @@ bool handle(PatternRewriter &b, CmpIOp cmpi, SmallVectorImpl<AffineExpr> &exprs,
   }
   assert(rhs.size());
   for (auto &lhspack : lhs)
-    if (!lhspack.getType().isa<IndexType>()) {
+    if (!isa<IndexType>(lhspack.getType())) {
       lhspack = b.create<arith::IndexCastOp>(
           cmpi.getLoc(), IndexType::get(cmpi.getContext()), lhspack);
     }
 
   for (auto &rhspack : rhs)
-    if (!rhspack.getType().isa<IndexType>()) {
+    if (!isa<IndexType>(rhspack.getType())) {
       rhspack = b.create<arith::IndexCastOp>(
           cmpi.getLoc(), IndexType::get(cmpi.getContext()), rhspack);
     }
@@ -1199,7 +1198,7 @@ bool handle(PatternRewriter &b, CmpIOp cmpi, SmallVectorImpl<AffineExpr> &exprs,
 /*
 static void replaceStore(memref::StoreOp store,
                          const SmallVector<Value, 2> &newIndexes) {
-  auto memrefType = store.getMemRef().getType().cast<MemRefType>();
+  auto memrefType = cast<MemRefType>(store.getMemRef().getType());
   size_t rank = memrefType.getRank();
   if (rank != newIndexes.size()) {
     llvm::errs() << store << "\n";
@@ -1217,7 +1216,7 @@ static void replaceLoad(memref::LoadOp load,
   PatternRewriter builder(load);
   Location loc = load.getLoc();
 
-  auto memrefType = load.getMemRef().getType().cast<MemRefType>();
+  auto memrefType = cast<MemRefType>(load.getMemRef().getType());
   size_t rank = memrefType.getRank();
   if (rank != newIndexes.size()) {
     llvm::errs() << load << "\n";
@@ -1238,7 +1237,7 @@ struct MoveLoadToAffine : public OpRewritePattern<memref::LoadOp> {
     if (!llvm::all_of(load.getIndices(), isValidIndex))
       return failure();
 
-    auto memrefType = load.getMemRef().getType().cast<MemRefType>();
+    auto memrefType = cast<MemRefType>(load.getMemRef().getType());
     int64_t rank = memrefType.getRank();
 
     // Create identity map for memrefs with at least one dimension or () -> ()
@@ -1280,7 +1279,7 @@ struct MoveStoreToAffine : public OpRewritePattern<memref::StoreOp> {
     if (!llvm::all_of(store.getIndices(), isValidIndex))
       return failure();
 
-    auto memrefType = store.getMemRef().getType().cast<MemRefType>();
+    auto memrefType = cast<MemRefType>(store.getMemRef().getType());
     int64_t rank = memrefType.getRank();
 
     // Create identity map for memrefs with at least one dimension or () -> ()
@@ -1562,7 +1561,7 @@ void AffineCFGPass::runOnOperation() {
           MoveStoreToAffine, MoveIfToAffine, MoveLoadToAffine,
           CanonicalieForBounds>(getOperation()->getContext());
   GreedyRewriteConfig config;
-  (void)applyPatternsAndFoldGreedily(getOperation(), std::move(rpl), config);
+  (void)applyPatternsGreedily(getOperation(), std::move(rpl), config);
 }
 
 std::unique_ptr<Pass> mlir::polygeist::replaceAffineCFGPass() {

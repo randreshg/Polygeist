@@ -279,7 +279,7 @@ void RaiseSCFToAffine::runOnOperation() {
   patterns.insert<ForOpRaising, ParallelOpRaising>(&getContext());
 
   GreedyRewriteConfig config;
-  (void)applyPatternsAndFoldGreedily(getOperation(), std::move(patterns),
+  (void)applyPatternsGreedily(getOperation(), std::move(patterns),
                                      config);
 }
 

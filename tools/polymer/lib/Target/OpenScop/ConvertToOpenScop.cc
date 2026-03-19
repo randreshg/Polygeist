@@ -225,7 +225,7 @@ void OslScopBuilder::buildScopContext(
       auto it = symbols.begin();
       while (it != symbols.end()) {
         auto lhs = it->cast<BlockArgument>();
-        auto rhs = sym.cast<BlockArgument>();
+        auto rhs = cast<BlockArgument>(sym);
         if (lhs.getArgNumber() >= rhs.getArgNumber())
           break;
         ++it;

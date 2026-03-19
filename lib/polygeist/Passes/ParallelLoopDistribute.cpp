@@ -487,7 +487,7 @@ static bool isNormalized(scf::ParallelOp op) {
 }
 static bool isNormalized(affine::AffineParallelOp op) {
   auto isZero = [](AffineExpr v) {
-    if (auto ce = v.dyn_cast<AffineConstantExpr>())
+    if (auto ce = dyn_cast<AffineConstantExpr>(v))
       return ce.getValue() == 0;
     return false;
   };
@@ -848,7 +848,7 @@ static LogicalResult distributeAroundBarrier(T op, BarrierOp barrier,
         rewriter.setInsertionPoint(u.getOwner());
         auto buf = alloc;
         for (auto idx : preLoop.getBody()->getArguments()) {
-          auto mt0 = buf.getType().cast<MemRefType>();
+          auto mt0 = cast<MemRefType>(buf.getType());
           std::vector<int64_t> shape(mt0.getShape());
           assert(shape.size() > 0);
           shape.erase(shape.begin());
@@ -1449,7 +1449,7 @@ static std::pair<Block *, Block::iterator> getInsertionPointAfterDef(Value v) {
   if (Operation *op = v.getDefiningOp())
     return {op->getBlock(), std::next(Block::iterator(op))};
 
-  BlockArgument blockArg = v.cast<BlockArgument>();
+  BlockArgument blockArg = cast<BlockArgument>(v);
   return {blockArg.getParentBlock(), blockArg.getParentBlock()->begin()};
 }
 
@@ -2712,7 +2712,7 @@ struct CPUifyPass : public SCFCPUifyBase<CPUifyPass> {
           addPatterns<false>(patterns, method);
         GreedyRewriteConfig config;
         config.maxIterations = 142;
-        if (failed(applyPatternsAndFoldGreedily(getOperation(),
+        if (failed(applyPatternsGreedily(getOperation(),
                                                 std::move(patterns), config))) {
           signalPassFailure();
           return;
@@ -2722,7 +2722,7 @@ struct CPUifyPass : public SCFCPUifyBase<CPUifyPass> {
         RewritePatternSet patterns(&getContext());
         GreedyRewriteConfig config;
         patterns.insert<LowerCacheLoad>(&getContext());
-        if (failed(applyPatternsAndFoldGreedily(getOperation(),
+        if (failed(applyPatternsGreedily(getOperation(),
                                                 std::move(patterns), config))) {
           signalPassFailure();
           return;

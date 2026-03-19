@@ -55,11 +55,11 @@ bool operator<(Value lhs, Value rhs) {
       return true;
     }
   }
-  auto lhsOR = lhs.cast<OpResult>();
+  auto lhsOR = cast<OpResult>(lhs);
   if (auto rhsBA = dyn_cast<BlockArgument>(rhs)) {
     return false;
   } else {
-    auto rhsOR = rhs.cast<OpResult>();
+    auto rhsOR = cast<OpResult>(rhs);
     if (lhsOR.getOwner() != rhsOR.getOwner())
       return lhsOR.getOwner() < rhsOR.getOwner();
     else
@@ -90,17 +90,17 @@ public:
   }
   Offset(AffineExpr op, unsigned numDims, unsigned numSymbols,
          mlir::OperandRange vals) {
-    if (auto opc = op.dyn_cast<AffineConstantExpr>()) {
+    if (auto opc = dyn_cast<AffineConstantExpr>(op)) {
       idx = opc.getValue();
       type = Type::Index;
       return;
     }
-    if (auto opd = op.dyn_cast<AffineDimExpr>()) {
+    if (auto opd = dyn_cast<AffineDimExpr>(op)) {
       val = vals[opd.getPosition()];
       type = Type::Value;
       return;
     }
-    if (auto ops = op.dyn_cast<AffineSymbolExpr>()) {
+    if (auto ops = dyn_cast<AffineSymbolExpr>(op)) {
       val = vals[numDims + ops.getPosition()];
       type = Type::Value;
       return;
@@ -1086,7 +1086,7 @@ bool PolygeistMem2Reg::forwardStoreToLoad(
   if (auto MT = dyn_cast<MemRefType>(AI.getType()))
     elType = MT.getElementType();
   else
-    elType = AI.getType().cast<LLVM::LLVMPointerType>().getElementType();
+    elType = cast<LLVM::LLVMPointerType>(AI.getType()).getElementType();
 
   std::deque<std::pair<mlir::Value, /*indexed*/ bool>> list = {{AI, false}};
 

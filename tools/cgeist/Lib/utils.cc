@@ -63,8 +63,8 @@ Operation *mlirclang::replaceFuncByOperation(
 mlir::Value mlirclang::castInteger(mlir::OpBuilder &builder,
                                    mlir::Location &loc, mlir::Value v,
                                    mlir::Type postTy_) {
-  auto prevTy = v.getType().cast<mlir::IntegerType>();
-  auto postTy = postTy_.cast<mlir::IntegerType>();
+  auto prevTy = cast<mlir::IntegerType>(v.getType());
+  auto postTy = cast<mlir::IntegerType>(postTy_);
   if (prevTy.getWidth() < postTy.getWidth())
     return builder.create<mlir::arith::ExtUIOp>(loc, postTy, v);
   else if (prevTy.getWidth() > postTy.getWidth())

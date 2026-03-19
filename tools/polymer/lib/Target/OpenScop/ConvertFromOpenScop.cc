@@ -670,7 +670,7 @@ void Importer::initializeSymbol(mlir::Value val) {
     } else {
       // Now the loop IV is there, we just find its owner for loop and clone
       // the op.
-      mlir::Block *blockToInsert = dstIV.cast<mlir::BlockArgument>().getOwner();
+      mlir::Block *blockToInsert = cast<mlir::BlockArgument>(dstIV).getOwner();
       hasInsertionPoint = true;
       b.setInsertionPointToStart(blockToInsert);
     }
@@ -931,7 +931,7 @@ void Importer::getInductionVars(clast_user_stmt *userStmt, osl_body_p body,
 static mlir::Value findBlockArg(mlir::Value v) {
   mlir::Value r = v;
   while (r != nullptr) {
-    if (r.isa<BlockArgument>())
+    if (isa<BlockArgument>(r))
       break;
 
     mlir::Operation *defOp = r.getDefiningOp();

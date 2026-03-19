@@ -80,7 +80,7 @@ static void mapDefToUses(mlir::func::FuncOp f, DefToUsesMap &defToUses) {
             isa<memref::AllocOp, memref::AllocaOp, memref::DimOp,
                 mlir::arith::ConstantOp, mlir::affine::AffineApplyOp>(defOp) ||
             (isa<mlir::arith::IndexCastOp>(defOp) &&
-             defOp->getOperand(0).isa<BlockArgument>()))
+             isa<BlockArgument>(defOp->getOperand(0))))
           continue;
 
         // The block that defines the value is different from the block of the
@@ -753,12 +753,12 @@ static mlir::Value findInsertionPointAfter(mlir::func::FuncOp f,
                                            ArrayRef<mlir::Value> candidates) {
   DominanceInfo dom(f);
   for (auto v1 : candidates) {
-    if (v1.isa<BlockArgument>())
+    if (isa<BlockArgument>(v1))
       continue;
 
     bool dominatesOthers = false;
     for (auto v2 : candidates) {
-      if (v2.isa<BlockArgument>())
+      if (isa<BlockArgument>(v2))
         continue;
 
       if (v1 != v2 && dom.dominates(v1.getDefiningOp(), v2.getDefiningOp())) {
@@ -786,7 +786,7 @@ createScratchpadAllocaOp(mlir::func::FuncOp f, mlir::Value spad,
 
   mlir::MemRefType memRefType = mlir::MemRefType::get(
       SmallVector<int64_t, 4>(domain.getNumDimVars(), -1),
-      spad.getType().cast<mlir::MemRefType>().getElementType());
+      cast<mlir::MemRefType>(spad.getType()).getElementType());
 
   llvm::SmallVector<mlir::Value, 4> memSizes(domain.getNumDimVars());
   for (unsigned int i = 0; i < domain.getNumDimVars(); i++) {
@@ -820,7 +820,7 @@ static void resetLoadAndStoreOpsToScratchpad(mlir::func::FuncOp f,
       llvm::SmallVector<mlir::affine::AffineForOp, 4> forOps;
       affine::getAffineForIVs(*op, &forOps);
 
-      mlir::MemRefType memRefType = spad.getType().cast<mlir::MemRefType>();
+      mlir::MemRefType memRefType = cast<mlir::MemRefType>(spad.getType());
       SmallVector<mlir::AffineExpr, 4> indices(memRefType.getShape().size(),
                                                b.getAffineConstantExpr(0));
       SmallVector<mlir::Value, 4> operands;

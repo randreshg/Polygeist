@@ -82,8 +82,8 @@ std::unique_ptr<ScopStmtImpl> ScopStmtImpl::get(mlir::Operation *callerOp,
 }
 
 static BlockArgument findTopLevelBlockArgument(mlir::Value val) {
-  if (val.isa<mlir::BlockArgument>())
-    return val.cast<mlir::BlockArgument>();
+  if (isa<mlir::BlockArgument>(val))
+    return cast<mlir::BlockArgument>(val);
 
   mlir::Operation *defOp = val.getDefiningOp();
   assert((defOp && isa<mlir::arith::IndexCastOp>(defOp)) &&
@@ -115,8 +115,8 @@ static void reorderSymbolsByOperandId(affine::FlatAffineValueConstraints &cst) {
   // bubble sort
   for (unsigned i = cst.getNumDimVars(); i < cst.getNumDimAndSymbolVars(); ++i)
     for (unsigned j = i + 1; j < cst.getNumDimAndSymbolVars(); ++j) {
-      auto fst = cst.getValue(i).cast<BlockArgument>();
-      auto snd = cst.getValue(j).cast<BlockArgument>();
+      auto fst = cast<BlockArgument>(cst.getValue(i));
+      auto snd = cast<BlockArgument>(cst.getValue(j));
       if (fst.getArgNumber() > snd.getArgNumber())
         cst.swapVar(i, j);
     }
@@ -193,7 +193,7 @@ mlir::func::CallOp ScopStmt::getCaller() const { return impl->caller; }
 static mlir::Value findBlockArg(mlir::Value v) {
   mlir::Value r = v;
   while (r != nullptr) {
-    if (r.isa<BlockArgument>())
+    if (isa<BlockArgument>(r))
       break;
 
     mlir::Operation *defOp = r.getDefiningOp();

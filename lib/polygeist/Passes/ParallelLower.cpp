@@ -204,7 +204,7 @@ void ParallelLower::runOnOperation() {
     auto callable = caller.getCallableForCallee();
     CallableOpInterface callableOp;
     if (SymbolRefAttr symRef = dyn_cast<SymbolRefAttr>(callable)) {
-      if (!symRef.isa<FlatSymbolRefAttr>())
+      if (!isa<FlatSymbolRefAttr>(symRef))
         return;
       auto *symbolOp =
           symbolTable.lookupNearestSymbolFrom(getOperation(), symRef);
@@ -258,7 +258,7 @@ void ParallelLower::runOnOperation() {
     auto callable = caller.getCallableForCallee();
     CallableOpInterface callableOp;
     if (SymbolRefAttr symRef = dyn_cast<SymbolRefAttr>(callable)) {
-      if (!symRef.isa<FlatSymbolRefAttr>())
+      if (!isa<FlatSymbolRefAttr>(symRef))
         return;
       auto *symbolOp =
           symbolTable.lookupNearestSymbolFrom(getOperation(), symRef);
@@ -555,7 +555,7 @@ void ParallelLower::runOnOperation() {
     });
 
     container.walk([&](mlir::LLVM::AllocaOp alop) {
-      auto PT = alop.getType().cast<LLVM::LLVMPointerType>();
+      auto PT = cast<LLVM::LLVMPointerType>(alop.getType());
       if (PT.getAddressSpace() == 5) {
         builder.setInsertionPointToStart(blockB);
         auto newAlloca = builder.create<LLVM::AllocaOp>(
@@ -660,7 +660,7 @@ void ParallelLower::runOnOperation() {
   {
     mlir::RewritePatternSet rpl(getOperation()->getContext());
     GreedyRewriteConfig config;
-    (void)applyPatternsAndFoldGreedily(getOperation(), std::move(rpl), config);
+    (void)applyPatternsGreedily(getOperation(), std::move(rpl), config);
   }
 }
 
@@ -823,7 +823,7 @@ void ConvertCudaRTtoCPU::runOnOperation() {
         } else if (callee == "cudaMalloc" || callee == "cudaMallocHost") {
           OpBuilder bz(call);
           Value arg = call->getOperand(1);
-          if (arg.getType().cast<IntegerType>().getWidth() < 64)
+          if (cast<IntegerType>(arg.getType()).getWidth() < 64)
             arg =
                 bz.create<arith::ExtUIOp>(call->getLoc(), bz.getI64Type(), arg);
           mlir::Value alloc =
@@ -832,7 +832,7 @@ void ConvertCudaRTtoCPU::runOnOperation() {
           {
             auto retv = bz.create<ConstantIntOp>(
                 call->getLoc(), 0,
-                call->getResult(0).getType().cast<IntegerType>().getWidth());
+                cast<IntegerType>(call->getResult(0).getType()).getWidth());
             Value vals[] = {retv};
             call->replaceAllUsesWith(ArrayRef<Value>(vals));
             call->erase();
@@ -845,7 +845,7 @@ void ConvertCudaRTtoCPU::runOnOperation() {
           {
             auto retv = bz.create<ConstantIntOp>(
                 call->getLoc(), 0,
-                call->getResult(0).getType().cast<IntegerType>().getWidth());
+                cast<IntegerType>(call->getResult(0).getType()).getWidth());
             Value vals[] = {retv};
             call->replaceAllUsesWith(ArrayRef<Value>(vals));
             call->erase();
@@ -857,7 +857,7 @@ void ConvertCudaRTtoCPU::runOnOperation() {
           OpBuilder bz(call);
           auto retv = bz.create<ConstantIntOp>(
               call->getLoc(), 0,
-              call->getResult(0).getType().cast<IntegerType>().getWidth());
+              cast<IntegerType>(call->getResult(0).getType()).getWidth());
           Value vals[] = {retv};
           call->replaceAllUsesWith(ArrayRef<Value>(vals));
           call->erase();
@@ -866,7 +866,7 @@ void ConvertCudaRTtoCPU::runOnOperation() {
           OpBuilder bz(call);
           auto retv = bz.create<ConstantIntOp>(
               call->getLoc(), 0,
-              call->getResult(0).getType().cast<IntegerType>().getWidth());
+              cast<IntegerType>(call->getResult(0).getType()).getWidth());
           Value vals[] = {retv};
           call->replaceAllUsesWith(ArrayRef<Value>(vals));
           call->erase();
@@ -885,7 +885,7 @@ void ConvertCudaRTtoCPU::runOnOperation() {
   {
     mlir::RewritePatternSet rpl(getOperation()->getContext());
     GreedyRewriteConfig config;
-    (void)applyPatternsAndFoldGreedily(getOperation(), std::move(rpl), config);
+    (void)applyPatternsGreedily(getOperation(), std::move(rpl), config);
   }
 }
 

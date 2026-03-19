@@ -361,7 +361,7 @@ static void generateAlternativeKernelDescs(mlir::ModuleOp m) {
             int bytes = DLI.getTypeSize(store.getValue().getType());
             auto stride = estimateStride(
                 store.getIndices(),
-                store.getMemRef().getType().cast<MemRefType>(), blockDims);
+                cast<MemRefType>(store.getMemRef().getType()), blockDims);
             auto memSpace = store.getMemRefType().getMemorySpaceAsInt();
             if (isCudaConstantGlobal(store.getMemRef()))
               memSpace = 4;
@@ -410,7 +410,7 @@ static void generateAlternativeKernelDescs(mlir::ModuleOp m) {
       };
 
       std::string newDesc =
-          oldDescs[regionId].cast<StringAttr>().str() + "blockDims=" +
+          cast<StringAttr>(oldDescs[regionId]).str() + "blockDims=" +
           (isBlockDimKnown ? "x:" + std::to_string(blockDims[0]) +
                                  ";"
                                  "y:" +

@@ -177,7 +177,7 @@ struct LowerAlternativesPass
       RewritePatternSet patterns(&getContext());
       patterns.insert<LowerGPUAlternativesOp>(&getContext());
       GreedyRewriteConfig config;
-      if (failed(applyPatternsAndFoldGreedily(getOperation(),
+      if (failed(applyPatternsGreedily(getOperation(),
                                               std::move(patterns), config))) {
         signalPassFailure();
         return;

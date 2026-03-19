@@ -296,7 +296,7 @@ void OpenMPOpt::runOnOperation() {
       getOperation()->getContext());
   GreedyRewriteConfig config;
   config.maxIterations = 47;
-  (void)applyPatternsAndFoldGreedily(getOperation(), std::move(rpl), config);
+  (void)applyPatternsGreedily(getOperation(), std::move(rpl), config);
 }
 
 std::unique_ptr<Pass> mlir::polygeist::createOpenMPOptPass() {

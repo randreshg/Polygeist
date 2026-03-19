@@ -74,7 +74,7 @@ struct PolygeistCanonicalizePass
   }
   void runOnOperation() override {
     LogicalResult converged =
-        applyPatternsAndFoldGreedily(getOperation(), *patterns, config);
+        applyPatternsGreedily(getOperation(), *patterns, config);
     // Canonicalization is best-effort. Non-convergence is not a pass failure.
     if (testConvergence && failed(converged))
       signalPassFailure();

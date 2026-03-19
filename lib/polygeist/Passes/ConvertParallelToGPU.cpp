@@ -273,7 +273,7 @@ struct SharedLLVMAllocaToGlobal : public OpRewritePattern<LLVM::AllocaOp> {
 
   LogicalResult matchAndRewrite(LLVM::AllocaOp ao,
                                 PatternRewriter &rewriter) const override {
-    auto PT = ao.getType().cast<LLVM::LLVMPointerType>();
+    auto PT = cast<LLVM::LLVMPointerType>(ao.getType());
     if (PT.getAddressSpace() != 5) {
       return failure();
     }
@@ -1290,7 +1290,7 @@ struct RemovePolygeistNoopOp : public OpRewritePattern<polygeist::NoopOp> {
     // that means the parallel loop whose indices were used for the operands got
     // optimized away (trip count = 1), reinsert it
     if (llvm::all_of(noop.getOperands(),
-                     [](Value v) { return !v.isa<BlockArgument>(); })) {
+                     [](Value v) { return !isa<BlockArgument>(v); })) {
       // TODO check that the args _are actually_ constants = 1
       Block *block = noop->getBlock();
       auto term = block->getTerminator();
@@ -1371,7 +1371,7 @@ struct RemovePolygeistGPUWrapperOp : public OpRewritePattern<OpType> {
     // that means the parallel loop whose indices were used for the operands got
     // optimized away (trip count = 1), reinsert it
     if (llvm::all_of(wrapper.getOperands(),
-                     [](Value v) { return !v.isa<BlockArgument>(); }) &&
+                     [](Value v) { return !isa<BlockArgument>(v); }) &&
         !isa<scf::ParallelOp>(wrapper->getParentOp())) {
       // TODO check that the args _are actually_ constants = 1
       Block *block = wrapper->getBlock();
@@ -1696,7 +1696,7 @@ struct ConvertParallelToGPU1Pass
       // clang-format on
       GreedyRewriteConfig config;
       if (failed(
-              applyPatternsAndFoldGreedily(m, std::move(patterns), config))) {
+              applyPatternsGreedily(m, std::move(patterns), config))) {
         signalPassFailure();
         return;
       }
@@ -1721,7 +1721,7 @@ struct ConvertParallelToGPU1Pass
       populateNormalizationPatterns(patterns);
       GreedyRewriteConfig config;
       if (failed(
-              applyPatternsAndFoldGreedily(m, std::move(patterns), config))) {
+              applyPatternsGreedily(m, std::move(patterns), config))) {
         signalPassFailure();
         return;
       }
@@ -2141,7 +2141,7 @@ struct ConvertParallelToGPU1Pass
       // clang-format on
       GreedyRewriteConfig config;
       if (failed(
-              applyPatternsAndFoldGreedily(m, std::move(patterns), config))) {
+              applyPatternsGreedily(m, std::move(patterns), config))) {
         signalPassFailure();
         return;
       }
@@ -2212,7 +2212,7 @@ struct ConvertParallelToGPU2Pass
                 RemoveFunction<func::FuncOp>, RemoveFunction<LLVM::LLVMFuncOp>>(
             &getContext());
     GreedyRewriteConfig config;
-    if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns),
+    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns),
                                             config))) {
       signalPassFailure();
       return;

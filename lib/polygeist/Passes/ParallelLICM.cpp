@@ -292,15 +292,15 @@ bool below(AffineExpr expr, size_t numDim, ValueRange operands, int64_t val) {
   if (val == -1)
     return false;
 
-  if (auto opd = expr.dyn_cast<AffineConstantExpr>()) {
+  if (auto opd = dyn_cast<AffineConstantExpr>(expr)) {
     if (opd.getValue() < val)
       return true;
     return false;
   }
-  if (auto opd = expr.dyn_cast<AffineDimExpr>()) {
+  if (auto opd = dyn_cast<AffineDimExpr>(expr)) {
     return below(operands[opd.getPosition()], val);
   }
-  if (auto opd = expr.dyn_cast<AffineSymbolExpr>()) {
+  if (auto opd = dyn_cast<AffineSymbolExpr>(expr)) {
     return below(operands[opd.getPosition() + numDim], val);
   }
   return false;
@@ -317,7 +317,7 @@ bool isSpeculatable(Operation *op) {
       Value ptr = load.getMemref();
       if (ptr.getDefiningOp<memref::AllocOp>() ||
           ptr.getDefiningOp<memref::AllocaOp>()) {
-        auto S = ptr.getType().cast<MemRefType>().getShape();
+        auto S = cast<MemRefType>(ptr.getType()).getShape();
         AffineMap map = load.getAffineMapAttr().getValue();
         for (auto idx : llvm::enumerate(map.getResults())) {
           if (!below(idx.value(), map.getNumDims(), load.getMapOperands(),
@@ -333,7 +333,7 @@ bool isSpeculatable(Operation *op) {
       Value ptr = load.getMemref();
       if (ptr.getDefiningOp<memref::AllocOp>() ||
           ptr.getDefiningOp<memref::AllocaOp>()) {
-        auto S = ptr.getType().cast<MemRefType>().getShape();
+        auto S = cast<MemRefType>(ptr.getType()).getShape();
         for (auto idx : llvm::enumerate(load.getIndices())) {
           if (!below(idx.value(), S[idx.index()]))
             return false;

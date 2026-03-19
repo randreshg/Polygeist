@@ -73,7 +73,7 @@ insertScratchpadForInterprocUses(mlir::Operation *defOp,
   // The memref shape is 1 and the type is derived from val.
   mlir::Type memrefType = MemRefType::get({1}, val.getType());
   mlir::Operation *allocaOp = b.create<memref::AllocaOp>(
-      defOp->getLoc(), memrefType.cast<MemRefType>());
+      defOp->getLoc(), cast<MemRefType>(memrefType));
   mlir::Value memref = allocaOp->getResult(0);
 
   // Give the callee an additional argument
@@ -240,9 +240,8 @@ static void getScopStmtOps(Operation *writeOp,
     if (isa<memref::AllocaOp, memref::AllocOp, memref::DimOp,
             mlir::affine::AffineApplyOp>(op) ||
         (isa<mlir::arith::IndexCastOp>(op) &&
-         op->getOperand(0).isa<BlockArgument>() &&
-         isa<func::FuncOp>(op->getOperand(0)
-                               .cast<BlockArgument>()
+         isa<BlockArgument>(op->getOperand(0)) &&
+         isa<func::FuncOp>(cast<BlockArgument>(op->getOperand(0))
                                .getOwner()
                                ->getParentOp()))) {
       LLVM_DEBUG(dbgs() << " -> Hits a terminating operator.\n\n");

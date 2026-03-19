@@ -831,7 +831,7 @@ public:
     func::CallOp origCaller = stmt.getCaller();
     SmallVector<Value> args;
     for (Value origArg : origCaller.getArgOperands()) {
-      auto ba = origArg.dyn_cast<BlockArgument>();
+      auto ba = dyn_cast<BlockArgument>(origArg);
       if (ba) {
         Operation *owner = ba.getOwner()->getParentOp();
         if (isa<func::FuncOp>(owner)) {
@@ -855,7 +855,7 @@ public:
           if (arg.getType() != origArg.getType()) {
             // This can only happen to index types as we may have replaced them
             // with the target system width
-            assert(origArg.getType().isa<IndexType>());
+            assert(isa<IndexType>(origArg.getType()));
             arg = b.create<arith::IndexCastOp>(loc, origArg.getType(), arg);
           }
           args.push_back(arg);
@@ -990,7 +990,7 @@ public:
     SmallVector<Value *> Args({&args...});
     for (unsigned I = 0; I < Args.size(); I++) {
       Type Ty = Args[I]->getType();
-      if (!Ty.isa<IndexType>()) {
+      if (!isa<IndexType>(Ty)) {
         *Args[I] =
             b.create<arith::IndexCastOp>(loc, b.getIndexType(), *Args[I]);
       }
@@ -1000,29 +1000,29 @@ public:
   template <class... Ts> Type convertToMaxWidth(Ts &&...args) {
     SmallVector<Value *> Args({&args...});
     if (llvm::all_of(Args,
-                     [&](Value *V) { return V->getType().isa<IndexType>(); }))
+                     [&](Value *V) { return isa<IndexType>(V->getType()); }))
       return Args[0]->getType();
     Type MaxTypeI = Args[0]->getType();
     IntegerType MaxType;
-    if (MaxTypeI.isa<IndexType>())
+    if (isa<IndexType>(MaxTypeI))
       // TODO This is temporary and we should get the target system index here
       MaxType = b.getI64Type();
     else
-      MaxType = MaxTypeI.cast<IntegerType>();
+      MaxType = cast<IntegerType>(MaxTypeI);
     unsigned MaxWidth = MaxType.getWidth();
     for (unsigned I = 0; I < Args.size(); I++) {
       Type Ty = Args[I]->getType();
-      if (Ty.isa<IndexType>())
+      if (isa<IndexType>(Ty))
         // TODO This is temporary and we should get the target system index here
         Ty = b.getI64Type();
-      if (Ty.cast<IntegerType>().getWidth() > MaxWidth) {
-        MaxType = Ty.cast<IntegerType>();
+      if (cast<IntegerType>(Ty).getWidth() > MaxWidth) {
+        MaxType = cast<IntegerType>(Ty);
         MaxWidth = MaxType.getWidth();
       }
     }
     for (unsigned I = 0; I < Args.size(); I++) {
       Type Ty = Args[I]->getType();
-      if (Ty.isa<IndexType>()) {
+      if (isa<IndexType>(Ty)) {
         *Args[I] = b.create<arith::IndexCastOp>(loc, MaxType, *Args[I]);
       } else if (Ty != MaxType) {
         *Args[I] = b.create<arith::ExtSIOp>(loc, MaxType, *Args[I]);
