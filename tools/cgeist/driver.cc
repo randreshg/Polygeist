@@ -27,9 +27,11 @@
 #include "mlir/Conversion/GPUCommon/GPUCommonPass.h"
 #include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
 #include "mlir/Conversion/GPUToROCDL/GPUToROCDLPass.h"
+#include "mlir/Conversion/IndexToLLVM/IndexToLLVM.h"
 #include "mlir/Conversion/LLVMCommon/LoweringOptions.h"
 #include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
 #include "mlir/Conversion/OpenMPToLLVM/ConvertOpenMPToLLVM.h"
+#include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Conversion/SCFToOpenMP/SCFToOpenMP.h"
 #include "mlir/Dialect/Affine/Transforms/Passes.h"
@@ -1086,6 +1088,9 @@ int main(int argc, char **argv) {
         pm3.addPass(polygeist::createConvertPolygeistToLLVMPass(
             options, CStyleMemRef, /* onlyGpuModules */ false,
             EmitCUDA ? "cuda" : "rocm"));
+        pm3.addPass(mlir::createConvertOpenMPToLLVMPass());
+        pm3.addPass(mlir::createConvertIndexToLLVMPass());
+        pm3.addPass(mlir::createReconcileUnrealizedCastsPass());
         pm3.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
             canonicalizerConfig, {}, {}));
 

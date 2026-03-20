@@ -2968,6 +2968,10 @@ public:
     auto newCallOp = rewriter.create<LLVM::CallOp>(
         callOp->getLoc(), callResultTypes, adaptor.getOperands(),
         callOp->getAttrs());
+    newCallOp.getProperties().operandSegmentSizes = {
+        static_cast<int32_t>(adaptor.getOperands().size()), 0};
+    newCallOp.getProperties().op_bundle_sizes =
+        rewriter.getDenseI32ArrayAttr({});
 
     if (numResults <= 1) {
       rewriter.replaceOp(callOp, newCallOp->getResults());
@@ -3145,9 +3149,6 @@ struct ConvertPolygeistToLLVMPass
     LLVMTypeConverter converter(&getContext(), options, &dataLayoutAnalysis);
     if (useCStyleMemRef) {
       converter.addConversion([&](MemRefType type) -> std::optional<Type> {
-        // auto elTy = convertMemrefElementTypeForLLVMPointer(type,
-        // converter); if (!elTy)
-        //   return Type();
         return LLVM::LLVMPointerType::get(type.getContext(),
                                           type.getMemorySpaceAsInt());
       });

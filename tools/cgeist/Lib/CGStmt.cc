@@ -15,7 +15,6 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Diagnostics.h"
 #include "llvm/Frontend/OpenMP/OMP.h.inc"
-#include <csignal>
 
 #define DEBUG_TYPE "CGStmt"
 
@@ -985,17 +984,30 @@ MLIRScanner::VisitOMPTaskLoopDirective(clang::OMPTaskLoopDirective *taskloop) {
   auto oldPoint = builder.getInsertionPoint();
   auto *oldBlock = builder.getInsertionBlock();
 
+  // LLVM 23: omp.taskloop is a wrapper (NoTerminator, SingleBlock);
+  // the actual loop goes inside omp.loop_nest.
   taskloopOp.getRegion().push_back(new Block());
-  Block &loopBlock = taskloopOp.getRegion().front();
-  for (auto lb : lowerBounds)
-    loopBlock.addArgument(lb.getType(), loc);
-  auto loopArgs = loopBlock.getArguments();
+  builder.setInsertionPointToStart(&taskloopOp.getRegion().front());
 
-  builder.setInsertionPointToStart(&loopBlock);
+  omp::LoopNestOperands taskLoopNestClauses;
+  taskLoopNestClauses.loopLowerBounds.assign(lowerBounds.begin(),
+                                             lowerBounds.end());
+  taskLoopNestClauses.loopUpperBounds.assign(upperBounds.begin(),
+                                             upperBounds.end());
+  taskLoopNestClauses.loopSteps.assign(steps.begin(), steps.end());
+  auto taskLoopNest =
+      builder.create<omp::LoopNestOp>(loc, taskLoopNestClauses);
+  // LoopNestOp::build creates an empty region; add a block with IV args.
+  auto &taskLoopNestBlock = taskLoopNest.getRegion().emplaceBlock();
+  for (auto lb : lowerBounds)
+    taskLoopNestBlock.addArgument(lb.getType(), loc);
+  auto loopArgs = taskLoopNestBlock.getArguments();
+
+  builder.setInsertionPointToStart(&taskLoopNestBlock);
   auto executeRegion =
       builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
   executeRegion.getRegion().push_back(new Block());
-  builder.create<omp::TerminatorOp>(loc);
+  builder.create<omp::YieldOp>(loc, ValueRange());
   builder.setInsertionPointToStart(&executeRegion.getRegion().back());
 
   auto *oldScope = allocationScope;
@@ -1187,14 +1199,26 @@ ValueCategory MLIRScanner::VisitOMPForDirective(clang::OMPForDirective *fors) {
   }
   auto affineOp = builder.create<omp::WsloopOp>(loc, wsloopClauses);
   affineOp.getRegion().push_back(new Block());
-  for (auto init : inits)
-    affineOp.getRegion().front().addArgument(init.getType(), init.getLoc());
-  auto inds = affineOp.getRegion().front().getArguments();
 
   auto oldpoint = builder.getInsertionPoint();
   auto *oldblock = builder.getInsertionBlock();
 
   builder.setInsertionPointToStart(&affineOp.getRegion().front());
+
+  // LLVM 23: omp.wsloop is a wrapper (NoTerminator, SingleBlock);
+  // the actual loop goes inside omp.loop_nest.
+  omp::LoopNestOperands loopNestClauses;
+  loopNestClauses.loopLowerBounds = inits;
+  loopNestClauses.loopUpperBounds = finals;
+  loopNestClauses.loopSteps = incs;
+  auto loopNest = builder.create<omp::LoopNestOp>(loc, loopNestClauses);
+  // LoopNestOp::build creates an empty region; add a block with IV args.
+  auto &loopNestBlock = loopNest.getRegion().emplaceBlock();
+  for (auto lb : inits)
+    loopNestBlock.addArgument(lb.getType(), loc);
+  auto inds = loopNestBlock.getArguments();
+
+  builder.setInsertionPointToStart(&loopNestBlock);
 
   auto executeRegion =
       builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());
@@ -1554,15 +1578,27 @@ ValueCategory MLIRScanner::VisitOMPParallelForDirective(
   auto wsLoopOp = builder.create<omp::WsloopOp>(loc, wsloopClauses2);
 
   wsLoopOp.getRegion().push_back(new Block());
-  for (auto init : inits)
-    wsLoopOp.getRegion().front().addArgument(init.getType(), init.getLoc());
-  auto wsLoopInds = wsLoopOp.getRegion().front().getArguments();
-  inds.assign(wsLoopInds.begin(), wsLoopInds.end());
 
   auto wsLoopOldpoint = builder.getInsertionPoint();
   auto *wsLoopOldblock = builder.getInsertionBlock();
 
   builder.setInsertionPointToStart(&wsLoopOp.getRegion().front());
+
+  // LLVM 23: omp.wsloop is a wrapper (NoTerminator, SingleBlock);
+  // the actual loop goes inside omp.loop_nest.
+  omp::LoopNestOperands loopNestClauses2;
+  loopNestClauses2.loopLowerBounds = inits;
+  loopNestClauses2.loopUpperBounds = finals;
+  loopNestClauses2.loopSteps = incs;
+  auto wsLoopNest = builder.create<omp::LoopNestOp>(loc, loopNestClauses2);
+  // LoopNestOp::build creates an empty region; add a block with IV args.
+  auto &wsLoopNestBlock = wsLoopNest.getRegion().emplaceBlock();
+  for (auto lb : inits)
+    wsLoopNestBlock.addArgument(lb.getType(), loc);
+  auto wsLoopInds = wsLoopNestBlock.getArguments();
+  inds.assign(wsLoopInds.begin(), wsLoopInds.end());
+
+  builder.setInsertionPointToStart(&wsLoopNestBlock);
 
   auto wsLoopExecuteRegion =
       builder.create<scf::ExecuteRegionOp>(loc, ArrayRef<mlir::Type>());

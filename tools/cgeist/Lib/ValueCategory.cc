@@ -27,6 +27,15 @@ static mlir::Type inferPointerElementType(mlir::Value ptr) {
     return gep.getElemType();
   if (auto m2p = ptr.getDefiningOp<polygeist::Memref2PointerOp>())
     return cast<MemRefType>(m2p.getSource().getType()).getElementType();
+  if (auto p2m = ptr.getDefiningOp<polygeist::Pointer2MemrefOp>())
+    return cast<MemRefType>(p2m.getResult().getType()).getElementType();
+  if (auto addrOf = ptr.getDefiningOp<LLVM::AddressOfOp>()) {
+    auto mod = addrOf->getParentOfType<mlir::ModuleOp>();
+    if (mod)
+      if (auto global =
+              mod.lookupSymbol<LLVM::GlobalOp>(addrOf.getGlobalName()))
+        return global.getType();
+  }
   return nullptr;
 }
 

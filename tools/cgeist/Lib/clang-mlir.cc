@@ -67,6 +67,13 @@ static mlir::Type deducePointeeType(mlir::Value ptr) {
     if (auto mt = dyn_cast<MemRefType>(p2m.getResult().getType()))
       return mt.getElementType();
   }
+  if (auto addrOf = ptr.getDefiningOp<LLVM::AddressOfOp>()) {
+    auto mod = addrOf->getParentOfType<mlir::ModuleOp>();
+    if (mod)
+      if (auto global =
+              mod.lookupSymbol<LLVM::GlobalOp>(addrOf.getGlobalName()))
+        return global.getType();
+  }
   return nullptr;
 }
 
@@ -578,7 +585,6 @@ mlir::Value MLIRScanner::createAllocOp(mlir::Type t, VarDecl *name,
 
         while (isa<VariableArrayType>(VAT->getElementType())) {
           VAT = dyn_cast<VariableArrayType>(VAT->getElementType());
-          VAT->dump();
           len = Visit(VAT->getSizeExpr()).getValue(varLoc, builder);
           len =
               builder.create<IndexCastOp>(varLoc, builder.getIndexType(), len);
