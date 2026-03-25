@@ -2608,6 +2608,9 @@ ValueCategory MLIRScanner::VisitBinaryOperator(clang::BinaryOperator *BO) {
     }
     if (forceUnsigned)
       signedType = false;
+    // i1 (boolean) always zero-extends: sext i1 true = -1, zext i1 true = 1
+    if (prevTy.getWidth() == 1)
+      signedType = false;
     if (postTy != prevTy) {
       if (signedType) {
         res = builder.create<mlir::arith::ExtSIOp>(loc, postTy, res);
@@ -4464,6 +4467,11 @@ ValueCategory MLIRScanner::VisitCastExpr(CastExpr *E) {
       if (bit->isSignedInteger())
         signedType = true;
     }
+    // i1 (boolean) should always zero-extend regardless of Clang source type,
+    // because Polygeist represents C int-typed boolean results (&&, ||, etc.)
+    // as i1 internally. Sign-extending i1 gives -1, not 1.
+    if (prevTy.getWidth() == 1)
+      signedType = false;
     if (postTy.getWidth() > 1) {
       if (signedType) {
         res = builder.create<arith::ExtSIOp>(loc, postTy, res);

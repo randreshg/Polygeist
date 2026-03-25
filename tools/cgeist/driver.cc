@@ -27,8 +27,12 @@
 #include "mlir/Conversion/GPUCommon/GPUCommonPass.h"
 #include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
 #include "mlir/Conversion/GPUToROCDL/GPUToROCDLPass.h"
+#include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/IndexToLLVM/IndexToLLVM.h"
 #include "mlir/Conversion/LLVMCommon/LoweringOptions.h"
+#include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
+#include "mlir/Conversion/Passes.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
 #include "mlir/Conversion/OpenMPToLLVM/ConvertOpenMPToLLVM.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
@@ -43,6 +47,8 @@
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
 #include "mlir/Dialect/LLVMIR/Transforms/RequestCWrappers.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/SCF/Transforms/Passes.h"
@@ -82,6 +88,7 @@
 #endif
 
 #include "polygeist/Dialect.h"
+#include "polygeist/Ops.h"
 #include "polygeist/Passes/Passes.h"
 
 #include <fstream>
@@ -1088,13 +1095,101 @@ int main(int argc, char **argv) {
         pm3.addPass(polygeist::createConvertPolygeistToLLVMPass(
             options, CStyleMemRef, /* onlyGpuModules */ false,
             EmitCUDA ? "cuda" : "rocm"));
-        pm3.addPass(mlir::createConvertOpenMPToLLVMPass());
-        pm3.addPass(mlir::createConvertIndexToLLVMPass());
-        pm3.addPass(mlir::createReconcileUnrealizedCastsPass());
-        pm3.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
-            canonicalizerConfig, {}, {}));
 
         if (mlir::failed(pm3.run(module.get()))) {
+          module->dump();
+          return 10;
+        }
+
+        // After Polygeist→LLVM, some OMP ops may still have struct operands.
+        // Extract aligned pointer (field [1]) from struct descriptors.
+        // Extract the aligned pointer (field [1]) from each struct operand.
+        {
+          auto ptrTy = LLVM::LLVMPointerType::get(&context);
+          auto extractPtr = [&](MutableOperandRange operands, Location loc,
+                                Operation *op) {
+            OpBuilder b(op);
+            b.setInsertionPoint(op);
+            for (unsigned i = 0; i < operands.size(); i++) {
+              mlir::Value v = operands[i].get();
+              if (auto st = dyn_cast<LLVM::LLVMStructType>(v.getType())) {
+                // Memref descriptor struct: field [1] is the aligned pointer.
+                mlir::Value ptr = b.create<LLVM::ExtractValueOp>(loc, v, 1);
+                operands.slice(i, 1).assign(ptr);
+              }
+            }
+          };
+          module->walk([&](Operation *op) {
+            if (auto wsloop = dyn_cast<mlir::omp::WsloopOp>(op)) {
+              if (wsloop.getNumReductionVars() > 0)
+                extractPtr(wsloop.getReductionVarsMutable(),
+                           wsloop.getLoc(), op);
+            } else if (auto taskloop = dyn_cast<mlir::omp::TaskloopOp>(op)) {
+              if (taskloop.getNumReductionVars() > 0)
+                extractPtr(taskloop.getReductionVarsMutable(),
+                           taskloop.getLoc(), op);
+            } else if (auto task = dyn_cast<mlir::omp::TaskOp>(op)) {
+              if (task.getDependVars().size() > 0)
+                extractPtr(task.getDependVarsMutable(),
+                           task.getLoc(), op);
+            }
+          });
+          // Update block args from struct to ptr.
+          module->walk([&](mlir::omp::WsloopOp wsloop) {
+            for (auto arg : wsloop.getRegion().front().getArguments())
+              if (isa<LLVM::LLVMStructType>(arg.getType()))
+                arg.setType(ptrTy);
+          });
+          module->walk([&](mlir::omp::TaskloopOp taskloop) {
+            for (auto arg : taskloop.getRegion().front().getArguments())
+              if (isa<LLVM::LLVMStructType>(arg.getType()))
+                arg.setType(ptrTy);
+          });
+          // Also fix DeclareReductionOp: type attr and region block args.
+          module->walk([&](mlir::omp::DeclareReductionOp decl) {
+            // If the reduction type became a struct, replace with ptr.
+            if (isa<LLVM::LLVMStructType>(decl.getType())) {
+              decl.setTypeAttr(mlir::TypeAttr::get(ptrTy));
+            }
+            // Fix block args in all regions (init, combiner, cleanup, alloc).
+            for (auto &region : decl->getRegions()) {
+              if (region.empty()) continue;
+              for (auto arg : region.front().getArguments())
+                if (isa<LLVM::LLVMStructType>(arg.getType()))
+                  arg.setType(ptrTy);
+            }
+          });
+          // Fix PrivateClauseOp: type attr and region block args.
+          module->walk([&](mlir::omp::PrivateClauseOp priv) {
+            if (isa<MemRefType>(priv.getType()))
+              priv.setTypeAttr(mlir::TypeAttr::get(ptrTy));
+            for (auto &region : priv->getRegions()) {
+              if (region.empty()) continue;
+              for (auto arg : region.front().getArguments())
+                if (isa<LLVM::LLVMStructType>(arg.getType()))
+                  arg.setType(ptrTy);
+            }
+          });
+          // Fix parallel/wsloop private_vars operands.
+          module->walk([&](mlir::omp::ParallelOp par) {
+            if (par.getPrivateVars().size() > 0)
+              extractPtr(par.getPrivateVarsMutable(), par.getLoc(), par);
+            // Fix block args for private vars.
+            for (auto arg : par.getRegion().front().getArguments())
+              if (isa<LLVM::LLVMStructType>(arg.getType()))
+                arg.setType(ptrTy);
+          });
+        }
+
+        mlir::PassManager pm3b(&context);
+        enablePrinting(pm3b);
+        pm3b.addPass(mlir::createConvertOpenMPToLLVMPass());
+        pm3b.addPass(mlir::createConvertIndexToLLVMPass());
+        pm3b.addPass(mlir::createReconcileUnrealizedCastsPass());
+        pm3b.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
+            canonicalizerConfig, {}, {}));
+
+        if (mlir::failed(pm3b.run(module.get()))) {
           module->dump();
           return 10;
         }

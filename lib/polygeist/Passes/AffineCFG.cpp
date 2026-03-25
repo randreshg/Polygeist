@@ -535,11 +535,12 @@ AffineApplyNormalizer::AffineApplyNormalizer(AffineMap map,
       if (!isValidSymbolInt(t, /*recur*/ false)) {
         if (t.getDefiningOp()) {
           if ((t = fix(t, false))) {
-            assert(isValidSymbolInt(t, /*recur*/ false));
+            if (!isValidSymbolInt(t, /*recur*/ false))
+              return;
           } else
-            llvm_unreachable("cannot move");
+            return;
         } else
-          llvm_unreachable("cannot move2");
+          return;
       }
       if (i < numDims) {
         // b. The mathematical composition of AffineMap composes dims.
@@ -583,17 +584,21 @@ AffineDimExpr AffineApplyNormalizer::renumberOneDim(Value v) {
   return cast<AffineDimExpr>(getAffineDimExpr(iterPos->second, v.getContext()));
 }
 
-static void composeAffineMapAndOperands(AffineMap *map,
+static bool composeAffineMapAndOperands(AffineMap *map,
                                         SmallVectorImpl<Value> *operands,
                                         PatternRewriter &rewriter,
                                         DominanceInfo &DI) {
+  if (!*map)
+    return false;
   AffineApplyNormalizer normalizer(*map, *operands, rewriter, DI);
   auto normalizedMap = normalizer.getAffineMap();
+  if (!normalizedMap)
+    return false;
   auto normalizedOperands = normalizer.getOperands();
   affine::canonicalizeMapAndOperands(&normalizedMap, &normalizedOperands);
   *map = normalizedMap;
   *operands = normalizedOperands;
-  assert(*map);
+  return (bool)*map;
 }
 
 bool need(AffineMap *map, SmallVectorImpl<Value> *operands) {
@@ -638,11 +643,19 @@ void fully2ComposeAffineMapAndOperands(PatternRewriter &builder, AffineMap *map,
       }
     }
   }
-  assert(map->getNumInputs() == operands->size());
-  while (need(map, operands)) {
-    composeAffineMapAndOperands(map, operands, builder, DI);
-    assert(map->getNumInputs() == operands->size());
+  if (map->getNumInputs() != operands->size()) {
+    // After index remapping, the map and operands can become inconsistent.
+    // Bail out rather than crashing.
+    return;
   }
+  while (*map && need(map, operands)) {
+    if (!composeAffineMapAndOperands(map, operands, builder, DI))
+      return;
+    if (map->getNumInputs() != operands->size())
+      return;
+  }
+  if (!*map)
+    return;
   *map = simplifyAffineMap(*map);
   for (auto &op : *operands) {
     if (!op.getType().isIndex()) {
@@ -909,7 +922,11 @@ struct CanonicalizeAffineApply
     DominanceInfo DI(scope);
 
     fully2ComposeAffineMapAndOperands(rewriter, &map, &mapOperands, DI);
+    if (map.getNumInputs() != mapOperands.size())
+      return failure();
     affine::canonicalizeMapAndOperands(&map, &mapOperands);
+    if (map.getNumInputs() != mapOperands.size())
+      return failure();
     map = removeDuplicateExprs(map);
 
     if (map == prevMap)
@@ -1261,11 +1278,14 @@ struct MoveLoadToAffine : public OpRewritePattern<memref::LoadOp> {
     }
     auto *scope = affine::getAffineScope(load)->getParentOp();
     DominanceInfo DI(scope);
-    assert(map.getNumInputs() == operands.size());
+    if (map.getNumInputs() != operands.size())
+      return failure();
     fully2ComposeAffineMapAndOperands(rewriter, &map, &operands, DI);
-    assert(map.getNumInputs() == operands.size());
+    if (map.getNumInputs() != operands.size())
+      return failure();
     affine::canonicalizeMapAndOperands(&map, &operands);
-    assert(map.getNumInputs() == operands.size());
+    if (map.getNumInputs() != operands.size())
+      return failure();
 
     affine::AffineLoadOp affineLoad = rewriter.create<affine::AffineLoadOp>(
         load.getLoc(), load.getMemRef(), map, operands);
@@ -1300,7 +1320,11 @@ struct MoveStoreToAffine : public OpRewritePattern<memref::StoreOp> {
     DominanceInfo DI(scope);
 
     fully2ComposeAffineMapAndOperands(rewriter, &map, &operands, DI);
+    if (map.getNumInputs() != operands.size())
+      return failure();
     affine::canonicalizeMapAndOperands(&map, &operands);
+    if (map.getNumInputs() != operands.size())
+      return failure();
 
     rewriter.create<affine::AffineStoreOp>(store.getLoc(),
                                            store.getValueToStore(),
@@ -1339,11 +1363,14 @@ template <typename T> struct AffineFixup : public OpRewritePattern<T> {
     auto *scope = affine::getAffineScope(op)->getParentOp();
     DominanceInfo DI(scope);
 
-    assert(map.getNumInputs() == operands.size());
+    if (map.getNumInputs() != operands.size())
+      return failure();
     fully2ComposeAffineMapAndOperands(rewriter, &map, &operands, DI);
-    assert(map.getNumInputs() == operands.size());
+    if (map.getNumInputs() != operands.size())
+      return failure();
     affine::canonicalizeMapAndOperands(&map, &operands);
-    assert(map.getNumInputs() == operands.size());
+    if (map.getNumInputs() != operands.size())
+      return failure();
 
     if (map == prevMap && !areChanged(operands, prevOperands))
       return failure();
@@ -1425,10 +1452,14 @@ struct CanonicalieForBounds : public OpRewritePattern<affine::AffineForOp> {
     DominanceInfo DI(scope);
 
     fully2ComposeAffineMapAndOperands(rewriter, &lbMap, &lbOperands, DI);
+    if (lbMap.getNumInputs() != lbOperands.size())
+      return failure();
     affine::canonicalizeMapAndOperands(&lbMap, &lbOperands);
     lbMap = removeDuplicateExprs(lbMap);
 
     fully2ComposeAffineMapAndOperands(rewriter, &ubMap, &ubOperands, DI);
+    if (ubMap.getNumInputs() != ubOperands.size())
+      return failure();
     affine::canonicalizeMapAndOperands(&ubMap, &ubOperands);
     ubMap = removeDuplicateExprs(ubMap);
 

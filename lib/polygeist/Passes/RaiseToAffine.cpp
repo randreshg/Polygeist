@@ -6,6 +6,7 @@
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Async/IR/Async.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -58,6 +59,20 @@ struct ForOpRaising : public OpRewritePattern<scf::ForOp> {
   }
   LogicalResult matchAndRewrite(scf::ForOp loop,
                                 PatternRewriter &rewriter) const final {
+    // Skip loops inside non-AffineScope region ops (e.g. OMP regions).
+    // Affine ops require a direct AffineScope ancestor for valid
+    // dim/symbol resolution. OMP ops lack this trait, so raising
+    // scf.for to affine.for inside them would produce invalid IR.
+    for (auto *parent = loop->getParentOp(); parent;
+         parent = parent->getParentOp()) {
+      if (parent->hasTrait<OpTrait::AffineScope>())
+        break;
+      if (parent->getNumRegions() > 0 &&
+          !parent->hasTrait<OpTrait::AffineScope>() &&
+          !isa<scf::ForOp, scf::IfOp, scf::WhileOp, scf::ExecuteRegionOp,
+               scf::ParallelOp, mlir::async::ExecuteOp>(parent))
+        return failure();
+    }
     if (isAffine(loop)) {
       OpBuilder builder(loop);
 
@@ -132,15 +147,23 @@ struct ForOpRaising : public OpRewritePattern<scf::ForOp> {
       auto *scope = affine::getAffineScope(loop)->getParentOp();
       DominanceInfo DI(scope);
 
+      auto hasNullOperand = [](SmallVector<Value> &ops) {
+        return llvm::any_of(ops, [](Value v) { return !v; });
+      };
+
       AffineMap lbMap = getMultiSymbolIdentity(builder, lbs.size());
       {
         fully2ComposeAffineMapAndOperands(rewriter, &lbMap, &lbs, DI);
+        if (!lbMap || lbMap.getNumInputs() != lbs.size() || hasNullOperand(lbs))
+          return failure();
         affine::canonicalizeMapAndOperands(&lbMap, &lbs);
         lbMap = removeDuplicateExprs(lbMap);
       }
       AffineMap ubMap = getMultiSymbolIdentity(builder, ubs.size());
       {
         fully2ComposeAffineMapAndOperands(rewriter, &ubMap, &ubs, DI);
+        if (!ubMap || ubMap.getNumInputs() != ubs.size() || hasNullOperand(ubs))
+          return failure();
         affine::canonicalizeMapAndOperands(&ubMap, &ubs);
         ubMap = removeDuplicateExprs(ubMap);
       }

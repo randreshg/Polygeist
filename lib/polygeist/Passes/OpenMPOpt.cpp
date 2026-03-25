@@ -158,6 +158,12 @@ struct CombineParallel : public OpRewritePattern<omp::ParallelOp> {
 
     for (Operation *prevOp = nextParallel->getPrevNode(); 1;) {
       if (prevParallel = dyn_cast<omp::ParallelOp>(prevOp)) {
+        // Only merge if num_threads, if_expr, and allocate match
+        if (prevParallel.getNumThreadsVars() !=
+            nextParallel.getNumThreadsVars())
+          return success(changed);
+        if (prevParallel.getIfExpr() != nextParallel.getIfExpr())
+          return success(changed);
         break;
       }
       // We can move this into the parallel if it only reads

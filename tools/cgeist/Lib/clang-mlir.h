@@ -294,6 +294,21 @@ public:
 
   ValueCategory VisitOMPTaskwaitDirective(clang::OMPTaskwaitDirective *);
 
+  ValueCategory VisitOMPMasterDirective(clang::OMPMasterDirective *);
+
+  ValueCategory VisitOMPBarrierDirective(clang::OMPBarrierDirective *);
+
+  ValueCategory VisitOMPOrderedDirective(clang::OMPOrderedDirective *);
+
+  ValueCategory VisitOMPCriticalDirective(clang::OMPCriticalDirective *);
+
+  ValueCategory VisitOMPAtomicDirective(clang::OMPAtomicDirective *);
+
+  ValueCategory VisitOMPTaskgroupDirective(clang::OMPTaskgroupDirective *);
+
+  ValueCategory
+  VisitOMPParallelSectionsDirective(clang::OMPParallelSectionsDirective *);
+
   ValueCategory VisitOMPForDirective(clang::OMPForDirective *);
 
   ValueCategory VisitOMPParallelDirective(clang::OMPParallelDirective *);

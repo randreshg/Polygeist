@@ -3267,12 +3267,26 @@ struct ConvertPolygeistToLLVMPass
                             LLVM::PowOp, LLVM::SinOp, LLVM::SqrtOp>();
         target.addLegalOp<gpu::YieldOp, gpu::GPUModuleOp>();
       }
-      target.addDynamicallyLegalOp<omp::ParallelOp, omp::WsloopOp>(
-          [&](Operation *op) { return converter.isLegal(&op->getRegion(0)); });
+      target.addDynamicallyLegalOp<omp::ParallelOp, omp::WsloopOp,
+          omp::TaskOp, omp::TaskloopOp, omp::TaskgroupOp, omp::SingleOp,
+          omp::MasterOp, omp::OrderedRegionOp, omp::SectionsOp,
+          omp::SectionOp, omp::CriticalOp, omp::LoopNestOp,
+          omp::AtomicUpdateOp, omp::AtomicCaptureOp>(
+          [&](Operation *op) {
+            for (auto &region : op->getRegions())
+              if (!region.empty() && !converter.isLegal(&region))
+                return false;
+            return converter.isLegal(op->getOperandTypes()) &&
+                   converter.isLegal(op->getResultTypes());
+          });
       target.addIllegalOp<scf::ForOp, scf::IfOp, scf::ParallelOp, scf::WhileOp,
                           scf::ExecuteRegionOp, func::FuncOp>();
-      target.addLegalOp<omp::TerminatorOp, omp::TaskyieldOp, omp::FlushOp,
-                        omp::YieldOp, omp::BarrierOp, omp::TaskwaitOp>();
+      // DeclareReductionOp and PrivateClauseOp are IsolatedFromAbove recipes
+      // with LLVM dialect ops in their regions. Mark as legal.
+      target.addLegalOp<omp::DeclareReductionOp, omp::PrivateClauseOp,
+                        omp::TerminatorOp, omp::TaskyieldOp, omp::FlushOp,
+                        omp::YieldOp, omp::BarrierOp, omp::TaskwaitOp,
+                        omp::AtomicReadOp, omp::AtomicWriteOp>();
       target.addDynamicallyLegalDialect<LLVM::LLVMDialect>(
           areAllTypesConverted);
       target.addDynamicallyLegalOp<LLVM::GlobalOp>(
