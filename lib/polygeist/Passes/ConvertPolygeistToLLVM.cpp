@@ -1528,7 +1528,8 @@ struct DynLoadOpLowering : public ConvertOpToLLVMPattern<DynLoadOp> {
     // Reverse iteration for row-major order
     auto sizes = adaptor.getSizes();
     auto indices = adaptor.getIndices();
-    for (int i = sizes.size() - 1; i >= 0; --i) {
+    unsigned rank = std::min(sizes.size(), indices.size());
+    for (int i = static_cast<int>(rank) - 1; i >= 0; --i) {
       Value index =
           rewriter.create<arith::IndexCastOp>(loc, idxType, indices[i]);
       Value mul = rewriter.create<LLVM::MulOp>(loc, index, stride);
@@ -1565,7 +1566,8 @@ struct DynStoreOpLowering : public ConvertOpToLLVMPattern<DynStoreOp> {
 
     auto sizes = adaptor.getSizes();
     auto indices = adaptor.getIndices();
-    for (int i = sizes.size() - 1; i >= 0; --i) {
+    unsigned rank = std::min(sizes.size(), indices.size());
+    for (int i = static_cast<int>(rank) - 1; i >= 0; --i) {
       Value index =
           rewriter.create<arith::IndexCastOp>(loc, idxType, indices[i]);
       Value mul = rewriter.create<LLVM::MulOp>(loc, index, stride);

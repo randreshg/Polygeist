@@ -217,6 +217,9 @@ private:
                            mlir::Value lb, mlir::Value ub,
                            const mlirclang::AffineLoopDescriptor &descr);
 
+  void buildSCFLoop(clang::ForStmt *fors, mlir::Location loc,
+                    const mlirclang::AffineLoopDescriptor &descr);
+
 public:
   const FunctionDecl *EmittingFunctionDecl;
   std::map<const ValueDecl *, ValueCategory> params;

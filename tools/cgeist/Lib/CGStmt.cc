@@ -15,6 +15,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Diagnostics.h"
 #include "llvm/Frontend/OpenMP/OMP.h.inc"
+#include <limits>
 
 #define DEBUG_TYPE "CGStmt"
 
@@ -533,6 +534,18 @@ bool matchIndvar(const Expr *expr, VarDecl *indVar) {
   return false;
 }
 
+static bool containsBreakOrContinue(const clang::Stmt *stmt) {
+  if (!stmt)
+    return false;
+  if (isa<clang::BreakStmt, clang::ContinueStmt>(stmt))
+    return true;
+  for (const clang::Stmt *child : stmt->children()) {
+    if (containsBreakOrContinue(child))
+      return true;
+  }
+  return false;
+}
+
 bool MLIRScanner::getUpperBound(clang::ForStmt *fors,
                                 mlirclang::AffineLoopDescriptor &descr) {
   auto *cond = fors->getCond();
@@ -585,6 +598,21 @@ bool MLIRScanner::getConstantStep(clang::ForStmt *fors,
       descr.setForwardMode(forwardLoop);
       return true;
     }
+  if (auto *binOp = dyn_cast<clang::BinaryOperator>(inc)) {
+    if (binOp->getOpcode() == clang::BinaryOperator::Opcode::BO_AddAssign ||
+        binOp->getOpcode() == clang::BinaryOperator::Opcode::BO_SubAssign) {
+      clang::Expr::EvalResult result;
+      if (!binOp->getRHS()->EvaluateAsInt(result, Glob.astContext))
+        return false;
+      int64_t step = result.Val.getInt().getSExtValue();
+      if (step <= 0 || step > std::numeric_limits<int>::max())
+        return false;
+      descr.setStep(static_cast<int>(step));
+      descr.setForwardMode(
+          binOp->getOpcode() == clang::BinaryOperator::Opcode::BO_AddAssign);
+      return true;
+    }
+  }
   return false;
 }
 
@@ -659,17 +687,52 @@ void MLIRScanner::buildAffineLoop(
   buildAffineLoopImpl(fors, loc, lb, ub, descr);
 }
 
+void MLIRScanner::buildSCFLoop(
+    clang::ForStmt *fors, mlir::Location loc,
+    const mlirclang::AffineLoopDescriptor &descr) {
+  mlir::Value lb = castToIndex(loc, descr.getLowerBound());
+  mlir::Value ub = castToIndex(loc, descr.getUpperBound());
+  mlir::Value step = castToIndex(loc, getConstantIndex(descr.getStep()));
+
+  auto forOp = builder.create<scf::ForOp>(loc, lb, ub, step);
+
+  auto oldpoint = builder.getInsertionPoint();
+  auto *oldblock = builder.getInsertionBlock();
+
+  builder.setInsertionPointToStart(forOp.getBody());
+
+  auto val = (mlir::Value)forOp.getInductionVar();
+  if (!descr.getForwardMode()) {
+    val = builder.create<SubIOp>(loc, val, lb);
+    val = builder.create<SubIOp>(
+        loc, builder.create<SubIOp>(loc, ub, getConstantIndex(1)), val);
+  }
+  auto idx = builder.create<IndexCastOp>(loc, descr.getType(), val);
+  assert(params.find(descr.getName()) != params.end());
+  params[descr.getName()].store(loc, builder, idx);
+
+  Visit(fors->getBody());
+
+  builder.setInsertionPoint(oldblock, oldpoint);
+}
+
 ValueCategory MLIRScanner::VisitForStmt(clang::ForStmt *fors) {
   IfScope scope(*this);
 
   auto loc = getMLIRLocation(fors->getForLoc());
 
   mlirclang::AffineLoopDescriptor affineLoopDescr;
-  if (Glob.scopLocList.isInScop(fors->getForLoc()) &&
-      isTrivialAffineLoop(fors, affineLoopDescr)) {
-    buildAffineLoop(fors, loc, affineLoopDescr);
-  } else {
-
+  bool loweredToStructuredLoop = false;
+  if (isTrivialAffineLoop(fors, affineLoopDescr)) {
+    if (Glob.scopLocList.isInScop(fors->getForLoc())) {
+      buildAffineLoop(fors, loc, affineLoopDescr);
+      loweredToStructuredLoop = true;
+    } else if (!containsBreakOrContinue(fors->getBody())) {
+      buildSCFLoop(fors, loc, affineLoopDescr);
+      loweredToStructuredLoop = true;
+    }
+  }
+  if (!loweredToStructuredLoop) {
     if (auto *s = fors->getInit()) {
       Visit(s);
     }

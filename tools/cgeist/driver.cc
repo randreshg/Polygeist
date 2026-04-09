@@ -668,7 +668,12 @@ int main(int argc, char **argv) {
 
   mlir::OpPassManager &optPM = pm.nest<mlir::func::FuncOp>();
   GreedyRewriteConfig canonicalizerConfig;
-  canonicalizerConfig.setMaxIterations(CanonicalizeIterations);
+  int effectiveCanonicalizeIterations = CanonicalizeIterations;
+  // Keep -O0 frontend lowering conservative unless the caller explicitly opts
+  // into more canonicalization.
+  if (Opt0 && CanonicalizeIterations.getNumOccurrences() == 0)
+    effectiveCanonicalizeIterations = 0;
+  canonicalizerConfig.setMaxIterations(effectiveCanonicalizeIterations);
   if (true) {
     optPM.addPass(mlir::createCSEPass());
     optPM.addPass(mlir::polygeist::createPolygeistCanonicalizePass(
