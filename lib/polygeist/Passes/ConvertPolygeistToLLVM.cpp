@@ -254,7 +254,6 @@ void visitVariableLengthMemrefOpLowering(Operation *op,
       rewriter.replaceOpWithNewOp<polygeist::DynStoreOp>(
           storeOp, storeOp.getValue(), storeOp.getMemref(),
           storeOp.getIndices(), opDimSizes);
-      storeOp.erase();
     }
   }
 }

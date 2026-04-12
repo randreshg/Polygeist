@@ -622,14 +622,7 @@ mlir::Value MLIRScanner::createAllocOp(mlir::Type t, VarDecl *name,
     }
   }
   assert(alloc);
-  // NamedAttribute attrs[] = {NamedAttribute("name", name)};
   if (name) {
-    // if (name->getName() == "i")
-    //  llvm_unreachable(" not i");
-    if (params.find(name) != params.end()) {
-      name->dump();
-    }
-    assert(params.find(name) == params.end());
     params[name] = ValueCategory(alloc, /*isReference*/ true);
   }
   return alloc;

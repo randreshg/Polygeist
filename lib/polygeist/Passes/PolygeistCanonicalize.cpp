@@ -74,8 +74,14 @@ struct PolygeistCanonicalizePass
     for (RegisteredOperationName op : context->getRegisteredOperations())
       op.getCanonicalizationPatterns(owningPatterns, context);
 
+    // ConditionPropagation in scf::IfOp canonicalization has a bug where
+    // getParentType() walks past the module boundary (null parent region),
+    // causing a SIGSEGV. Disable it until the upstream LLVM fix is available.
+    SmallVector<std::string> allDisabled(disabledPatterns.begin(),
+                                         disabledPatterns.end());
+    allDisabled.push_back("(anonymous namespace)::ConditionPropagation");
     patterns = std::make_shared<FrozenRewritePatternSet>(
-        std::move(owningPatterns), disabledPatterns, enabledPatterns);
+        std::move(owningPatterns), allDisabled, enabledPatterns);
     return success();
   }
   void runOnOperation() override {
