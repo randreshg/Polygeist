@@ -1586,6 +1586,45 @@ struct DynStoreOpLowering : public ConvertOpToLLVMPattern<DynStoreOp> {
     return success();
   }
 };
+
+struct CStyleMemRefCopyOpLowering
+    : public ConvertOpToLLVMPattern<memref::CopyOp> {
+  using ConvertOpToLLVMPattern<memref::CopyOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(memref::CopyOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto srcType = dyn_cast<MemRefType>(op.getSource().getType());
+    auto targetType = dyn_cast<MemRefType>(op.getTarget().getType());
+    if (!srcType || !targetType)
+      return failure();
+
+    auto isStaticContiguous = [](MemRefType type) {
+      return type.hasStaticShape() &&
+             (type.getLayout().isIdentity() ||
+              memref::isStaticShapeAndContiguousRowMajor(type));
+    };
+    if (!isStaticContiguous(srcType) || !isStaticContiguous(targetType))
+      return failure();
+
+    if (srcType.getNumElements() != targetType.getNumElements())
+      return failure();
+
+    Location loc = op.getLoc();
+    Type indexType = getTypeConverter()->getIndexType();
+    Value totalElements = rewriter.create<LLVM::ConstantOp>(
+        loc, indexType,
+        rewriter.getIntegerAttr(indexType, srcType.getNumElements()));
+    Value elementSize = getSizeInBytes(loc, srcType.getElementType(), rewriter);
+    Value totalSize =
+        rewriter.create<LLVM::MulOp>(loc, totalElements, elementSize);
+    LLVM::MemcpyOp::create(rewriter, loc, adaptor.getTarget(),
+                           adaptor.getSource(), totalSize,
+                           /*isVolatile=*/false);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
 } // namespace
 
 /// Only retain those attributes that are not constructed by
@@ -3053,7 +3092,8 @@ populateCStyleMemRefLoweringPatterns(RewritePatternSet &patterns,
   patterns.add<CAllocaOpLowering, CAllocOpLowering, CDeallocOpLowering,
                GetGlobalOpLowering, GlobalOpLowering, CLoadOpLowering,
                CStoreOpLowering, AllocaScopeOpLowering, CAtomicRMWOpLowering,
-               DynLoadOpLowering, DynStoreOpLowering>(typeConverter);
+               DynLoadOpLowering, DynStoreOpLowering,
+               CStyleMemRefCopyOpLowering>(typeConverter);
 }
 
 /// Appends the patterns lowering operations from the Func dialect to the LLVM
