@@ -23,6 +23,7 @@ def UndefOp
   let summary = "More flexible undef op";
   let skipDefaultBuilders = 1;
   let results = (outs AnyType:$result);
+  let assemblyFormat = "attr-dict `:` type($result)";
   let builders = [
     OpBuilder<(ins "Type":$type), [{
       $_state.types.push_back(type);
